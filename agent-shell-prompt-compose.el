@@ -32,6 +32,8 @@
 (require 'subr-x)
 (require 'window)
 (require 'flymake)
+(require 'markdown-overlays)
+(require 'shell-maker)
 
 (eval-when-compile
   (require 'cl-lib))
@@ -40,8 +42,18 @@
 (declare-function agent-shell--start "agent-shell")
 (declare-function agent-shell-select-config "agent-shell")
 (declare-function agent-shell-insert "agent-shell")
+(declare-function agent-shell--make-header "agent-shell")
+(declare-function agent-shell--relevant-text "agent-shell")
+(declare-function agent-shell--state "agent-shell")
+(declare-function agent-shell-interrupt "agent-shell")
+(declare-function agent-shell-next-permission-button "agent-shell")
+(declare-function agent-shell-previous-permission-button "agent-shell")
+(declare-function agent-shell-ui-backward-block "agent-shell")
+(declare-function agent-shell-ui-forward-block "agent-shell")
+(declare-function agent-shell-ui-mode "agent-shell")
 
 (defvar agent-shell-preferred-agent-config)
+(defvar agent-shell-header-style)
 
 (defvar agent-shell-prompt-compose--experimental-compose nil)
 
