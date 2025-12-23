@@ -39,17 +39,25 @@
 (eval-when-compile
   (require 'cl-lib))
 
+(declare-function agent-shell--current-shell "agent-shell")
+(declare-function agent-shell--display-buffer "agent-shell")
+(declare-function agent-shell--get-region "agent-shell")
 (declare-function agent-shell--insert-to-shell-buffer "agent-shell")
 (declare-function agent-shell--make-header "agent-shell")
 (declare-function agent-shell--relevant-text "agent-shell")
 (declare-function agent-shell--shell-buffer "agent-shell")
 (declare-function agent-shell--start "agent-shell")
 (declare-function agent-shell--state "agent-shell")
+(declare-function agent-shell-buffers "agent-shell")
+(declare-function agent-shell-cycle-session-mode "agent-shell")
 (declare-function agent-shell-interrupt "agent-shell")
 (declare-function agent-shell-next-permission-button "agent-shell")
+(declare-function agent-shell-other-buffer "agent-shell")
 (declare-function agent-shell-previous-permission-button "agent-shell")
 (declare-function agent-shell-project-buffers "agent-shell")
 (declare-function agent-shell-select-config "agent-shell")
+(declare-function agent-shell-set-session-mode "agent-shell")
+(declare-function agent-shell-set-session-model "agent-shell")
 (declare-function agent-shell-ui-backward-block "agent-shell")
 (declare-function agent-shell-ui-forward-block "agent-shell")
 (declare-function agent-shell-ui-mode "agent-shell")
@@ -550,7 +558,9 @@ When FORCE-REFRESH is non-nil, recalculate and update cache."
       position)))
 
 (cl-defun agent-shell-viewport--busy-p (&key viewport-buffer)
-  "Return non-nil if the associated shell buffer is busy."
+  "Return non-nil if the associated shell buffer is busy.
+
+VIEWPORT-BUFFER is the viewport buffer to check."
   (when-let ((shell-buffer (agent-shell--shell-buffer
                             :viewport-buffer viewport-buffer
                             :no-error t)))

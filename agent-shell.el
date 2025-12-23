@@ -1,4 +1,4 @@
-;;; agent-shell.el --- A single native shell experience to interact with agentic providers (Claude Code, Cursor, Gemini CLI, Goose, Codex, OpenCode, Qwen, etc.)  -*- lexical-binding: t; -*-
+;;; agent-shell.el --- Native agentic integrations for Claude Code, Gemini CLI, etc.  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2024 Alvaro Ramirez
 
@@ -1532,7 +1532,7 @@ Set NEW-SESSION to start a separate new session."
     (user-error "'agent-shell--transcript-file-path-function is retired.
 
 Please use 'agent-shell-transcript-file-path-function and unbind old
-variable (see makunbound)."))
+variable (see makunbound)"))
   (with-temp-buffer ;; client-maker needs a buffer (use a temp one)
     (unless (and (map-elt config :client-maker)
                  (funcall (map-elt config :client-maker) (current-buffer)))
@@ -4172,7 +4172,8 @@ or select a specific request to remove."
             (selection (cdr (assoc (completing-read "Remove: " choices nil t) choices))))
        (list (unless (eq selection 'remove-all) selection)))))
   (if remove-index
-      (when-let* ((confirmed (y-or-n-p (format "Remove? \"%s\""
+      (when-let* ((message "Remove? \"%s\"")
+                  (confirmed (y-or-n-p (format message
                                                (nth remove-index
                                                     (map-elt agent-shell--state :pending-requests)))))
                   (pending (map-elt agent-shell--state :pending-requests))
@@ -4181,7 +4182,7 @@ or select a specific request to remove."
         (map-put! agent-shell--state :pending-requests new-pending)
         (message "Removed (%d remaining)"
                  (length new-pending)))
-    (when (y-or-n-p (format "Remove %d pending requests? "
+    (when (y-or-n-p (format "Remove %d pending requests?"
                             (length (map-elt agent-shell--state :pending-requests))))
       (map-put! agent-shell--state :pending-requests nil)
       (message "Removed all pending requests"))))
