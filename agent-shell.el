@@ -1022,7 +1022,10 @@ If the buffer's file has changed, prompt the user to reload it."
                (content .params.content)
                (dir (file-name-directory path))
                (buffer (or (find-buffer-visiting path)
-                           (find-file-noselect path))))
+                           ;; Prevent auto-insert-mode
+                           ;; See issue #170
+                           (let ((auto-insert nil))
+                             (find-file-noselect path)))))
           (when (and dir (not (file-exists-p dir)))
             (make-directory dir t))
           (with-temp-buffer
