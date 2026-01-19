@@ -188,24 +188,24 @@
 
 (ert-deftest agent-shell--format-plan-test ()
   "Test `agent-shell--format-plan' function."
-  (dolist (test-case '(;; Graphical display mode
+  (dolist (test-case `(;; Graphical display mode
                        ( :graphic t
                          :homogeneous-expected
-                         (concat " pending   Update state initialization  \n"
-                                 " pending   Update session initialization")
+                         ,(concat " pending   Update state initialization  \n"
+                                  " pending   Update session initialization")
                          :mixed-expected
-                         (concat " pending       First task \n"
-                                 " in progress   Second task\n"
-                                 " completed     Third task "))
+                         ,(concat " pending       First task \n"
+                                  " in progress   Second task\n"
+                                  " completed     Third task "))
                        ;; Terminal display mode
                        ( :graphic nil
                          :homogeneous-expected
-                         (concat "[pending]  Update state initialization  \n"
-                                 "[pending]  Update session initialization")
+                         ,(concat "[pending]  Update state initialization  \n"
+                                  "[pending]  Update session initialization")
                          :mixed-expected
-                         (concat "[pending]      First task \n"
-                                 "[in progress]  Second task\n"
-                                 "[completed]    Third task "))))
+                         ,(concat "[pending]      First task \n"
+                                  "[in progress]  Second task\n"
+                                  "[completed]    Third task "))))
     (cl-letf (((symbol-function 'display-graphic-p)
                (lambda (&optional _display) (plist-get test-case :graphic))))
       ;; Test homogeneous statuses

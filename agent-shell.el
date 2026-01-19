@@ -1517,13 +1517,11 @@ DESTINATION-DIR is required and must be provided."
                    (_ '("unknown" warning))))
          (label (car config))
          (face (cadr config))
-         (color (face-foreground face nil t))
          ;; Wrap the label in [ and ] in TUI which cannot render the box border.
          (label-format (if (display-graphic-p) " %s " "[%s]")))
     (agent-shell--add-text-properties
      (propertize (format label-format label) 'font-lock-face 'default)
-     'font-lock-face
-     `(:foreground ,color :box (:color ,color)))))
+     'font-lock-face (list face '(:box t)))))
 
 (defun agent-shell--shorten-paths (text &optional include-project)
   "Shorten file paths in TEXT relative to project root.
