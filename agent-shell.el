@@ -797,7 +797,7 @@ otherwise returns COMMAND unchanged."
                               (cons :command (map-nested-elt update '(rawInput command)))
                               (cons :description (map-nested-elt update '(rawInput description)))
                               (cons :content (map-elt update 'content)))
-                        (when-let ((diff (agent-shell--make-diff-info (map-elt update 'content))))
+                        (when-let ((diff (agent-shell--make-diff-info :tool-call update)))
                           (list (cons :diff diff)))))
                (let ((tool-call-labels (agent-shell-make-tool-call-label
                                         state (map-elt update 'toolCallId))))
@@ -906,7 +906,7 @@ otherwise returns COMMAND unchanged."
                                                 "bash"))
                                       (command (map-nested-elt update '(rawInput command))))
                             (list (cons :title command)))
-                          (when-let ((diff (agent-shell--make-diff-info (map-elt update 'content))))
+                          (when-let ((diff (agent-shell--make-diff-info :tool-call update)))
                             (list (cons :diff diff)))))
                  (let* ((diff (map-nested-elt state `(:tool-calls ,.toolCallId :diff)))
                         (output (concat
@@ -1026,7 +1026,8 @@ otherwise returns COMMAND unchanged."
                           (cons :status .params.toolCall.status)
                           (cons :kind .params.toolCall.kind)
                           (cons :permission-request-id .id))
-                    (when-let ((diff (agent-shell--make-diff-info .params.toolCall.content)))
+                    (when-let ((diff (agent-shell--make-diff-info
+                                      :tool-call .params.toolCall)))
                       (list (cons :diff diff)))))
            (agent-shell--update-fragment
             :state state
@@ -1312,45 +1313,60 @@ Example output:
                                'font-lock-face 'font-lock-comment-face))))
      :joiner "\n")))
 
-(defun agent-shell--make-diff-info (acp-content)
-  "Make diff information from ACP's tool_call_update's ACP-CONTENT.
+(cl-defun agent-shell--make-diff-info (&key tool-call)
+  "Make diff information from TOOL-CALL.
 
-CONTENT is of the the type ToolCallContent as per ACP spec:
+TOOL-CALL is an ACP tool call object that may contain diff info in
+either `content' (standard ACP format) or `rawInput' (eg. Copilot).
 
-https://agentclientprotocol.com/protocol/schema#toolcallcontent
+Standard ACP format uses content with type \"diff\" containing
+oldText/newText/path fields.
+
+See https://agentclientprotocol.com/protocol/schema#toolcallcontent
+
+Copilot sends old_str/new_str/path in rawInput instead.
+
+See https://github.com/xenodium/agent-shell/issues/217
 
 Returns in the form:
 
  `((:old . old-text)
    (:new . new-text)
    (:file . file-path))."
-  (when-let* ((diff-item (cond
-                          ;; Single diff object
-                          ((and acp-content (equal (map-elt acp-content 'type) "diff"))
-                           acp-content)
-                          ;; TODO: Is this needed?
-                          ;; Isn't acp-content always an alist?
-                          ;; Vector/array acp-content - find diff item
-                          ((vectorp acp-content)
-                           (seq-find (lambda (item)
-                                       (equal (map-elt item 'type) "diff"))
-                                     acp-content))
-                          ;; TODO: Is this needed?
-                          ;; Isn't acp-content always an alist?
-                          ;; List acp-content - find diff item
-                          ((listp acp-content)
-                           (seq-find (lambda (item)
-                                       (equal (map-elt item 'type) "diff"))
-                                     acp-content))))
-              ;; oldText can be nil for Write tools creating new files, default to ""
-              ;; TODO: Currently don't have a way to capture overwrites
-              (old-text (or (map-elt diff-item 'oldText) ""))
-              (new-text (map-elt diff-item 'newText))
-              (file-path (map-elt diff-item 'path)))
-    (append (list (cons :old old-text)
-                  (cons :new new-text))
-            (when file-path
-              (list (cons :file file-path))))))
+  (let ((content (map-elt tool-call 'content))
+        (raw-input (map-elt tool-call 'rawInput)))
+    (when-let* ((diff-item (cond
+                            ;; Single diff object
+                            ((and content (equal (map-elt content 'type) "diff"))
+                             content)
+                            ;; TODO: Is this needed?
+                            ;; Isn't content always an alist?
+                            ;; Vector/array content - find diff item
+                            ((vectorp content)
+                             (seq-find (lambda (item)
+                                         (equal (map-elt item 'type) "diff"))
+                                       content))
+                            ;; TODO: Is this needed?
+                            ;; Isn't content always an alist?
+                            ;; List content - find diff item
+                            ((listp content)
+                             (seq-find (lambda (item)
+                                         (equal (map-elt item 'type) "diff"))
+                                       content))
+                            ;; Copilot sends old_str/new_str in rawInput
+                            ((and raw-input (map-elt raw-input 'new_str))
+                             `((oldText . ,(or (map-elt raw-input 'old_str) ""))
+                               (newText . ,(map-elt raw-input 'new_str))
+                               (path . ,(map-elt raw-input 'path))))))
+                ;; oldText can be nil for Write tools creating new files, default to ""
+                ;; TODO: Currently don't have a way to capture overwrites
+                (old-text (or (map-elt diff-item 'oldText) ""))
+                (new-text (map-elt diff-item 'newText))
+                (file-path (map-elt diff-item 'path)))
+      (append (list (cons :old old-text)
+                    (cons :new new-text))
+              (when file-path
+                (list (cons :file file-path)))))))
 
 
 (defun agent-shell--format-diff-as-text (diff)
