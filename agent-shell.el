@@ -3186,7 +3186,7 @@ For example:
                                   :tool-call-id tool-call-id)
                          :keymap keymap
                          :navigatable t
-                         :char ?v
+                         :char "v"
                          :option "view diff"))))
     (format "╭─
 
