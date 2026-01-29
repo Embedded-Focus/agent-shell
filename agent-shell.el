@@ -60,6 +60,7 @@
 (require 'agent-shell-mistral)
 (require 'agent-shell-openai)
 (require 'agent-shell-opencode)
+(require 'agent-shell-pi)
 (require 'agent-shell-project)
 (require 'agent-shell-qwen)
 (require 'agent-shell-ui)
@@ -343,6 +344,7 @@ Goose, Cursor, Auggie, and others."
         (agent-shell-goose-make-agent-config)
         (agent-shell-mistral-make-config)
         (agent-shell-opencode-make-agent-config)
+        (agent-shell-pi-make-agent-config)
         (agent-shell-qwen-make-agent-config)))
 
 (defcustom agent-shell-agent-configs
