@@ -515,6 +515,47 @@
         ;; Should be a single text block with the original prompt
         (should (equal prompt '[((type . "text") (text . "Test prompt with @file.txt"))]))))))
 
+(ert-deftest agent-shell--send-command-emits-turn-complete-event-test ()
+  "Test `agent-shell--send-command' emits turn-complete on success."
+  (let ((received-events nil)
+        (captured-on-success nil)
+        (agent-shell--state (list (cons :buffer (current-buffer))
+                                  (cons :event-subscriptions nil)
+                                  (cons :client 'test-client)
+                                  (cons :session (list (cons :id "test-session")))
+                                  (cons :last-entry-type nil)
+                                  (cons :tool-calls nil)
+                                  (cons :usage (list (cons :total-tokens 0)))))
+        (agent-shell-show-busy-indicator nil)
+        (agent-shell-show-usage-at-turn-end nil))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'agent-shell--send-request)
+               (lambda (&rest args)
+                 (setq captured-on-success (plist-get args :on-success))))
+              ((symbol-function 'shell-maker-finish-output)
+               (lambda (&rest _)))
+              ((symbol-function 'agent-shell--process-pending-request)
+               (lambda (&rest _))))
+      (agent-shell-subscribe-to
+       :shell-buffer (current-buffer)
+       :event 'turn-complete
+       :on-event (lambda (event)
+                   (push event received-events)))
+      (agent-shell--send-command
+       :prompt "Hello"
+       :shell-buffer (current-buffer))
+      ;; Simulate the ACP response arriving
+      (should captured-on-success)
+      (funcall captured-on-success
+               `((stopReason . "end_turn")
+                 (usage . ((totalTokens . 1500)))))
+      (should (= (length received-events) 1))
+      (let ((data (map-elt (car received-events) :data)))
+        (should (equal (map-elt data :stop-reason) "end_turn"))
+        (should (equal (map-elt (map-elt data :usage) :total-tokens)
+                       1500))))))
+
 (ert-deftest agent-shell--format-diff-as-text-test ()
   "Test `agent-shell--format-diff-as-text' function."
   ;; Test nil input
@@ -1014,6 +1055,37 @@ code block content
       (agent-shell--emit-event :event 'prompt-ready)
       (should (= (length received-events) 1))
       (should (equal (map-elt (nth 0 received-events) :event) 'prompt-ready)))))
+
+(ert-deftest agent-shell--on-request-emits-permission-request-event-test ()
+  "Test `agent-shell--on-request' emits permission-request event."
+  (let ((received-events nil)
+        (agent-shell--state (list (cons :buffer (current-buffer))
+                                  (cons :event-subscriptions nil)
+                                  (cons :tool-calls nil)
+                                  (cons :last-entry-type nil))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'agent-shell--update-fragment)
+               (lambda (&rest _))))
+      (agent-shell-subscribe-to
+       :shell-buffer (current-buffer)
+       :event 'permission-request
+       :on-event (lambda (event)
+                   (push event received-events)))
+      (agent-shell--on-request
+       :state agent-shell--state
+       :acp-request `((id . "req-123")
+                      (method . "session/request_permission")
+                      (params . ((toolCall . ((toolCallId . "tc-456")
+                                              (title . "Run command")
+                                              (status . "pending")
+                                              (kind . "bash")))))))
+      (should (= (length received-events) 1))
+      (let ((data (map-elt (car received-events) :data)))
+        (should (equal (map-elt data :request-id) "req-123"))
+        (should (equal (map-elt data :tool-call-id) "tc-456"))
+        (should (equal (map-elt (map-elt data :tool-call) :title)
+                       "Run command"))))))
 
 (ert-deftest agent-shell--initiate-session-prefers-list-and-load-when-supported ()
   "Test `agent-shell--initiate-session' prefers session/list + session/load."
