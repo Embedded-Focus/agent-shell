@@ -1577,6 +1577,12 @@ COMMAND, when present, may be a shell command string or an argv vector."
                                         :existing-only t)))
              (with-current-buffer viewport-buffer
                (agent-shell-jump-to-latest-permission-button-row))))
+         (let ((tool-call-id (map-nested-elt acp-request '(params toolCall toolCallId))))
+           (agent-shell--emit-event
+            :event 'permission-request
+            :data (list (cons :request-id (map-elt acp-request 'id))
+                        (cons :tool-call-id tool-call-id)
+                        (cons :tool-call (map-nested-elt state (list :tool-calls tool-call-id))))))
          (map-put! state :last-entry-type "session/request_permission"))
         ((equal (map-elt acp-request 'method) "fs/read_text_file")
          (agent-shell--on-fs-read-text-file-request
@@ -2374,6 +2380,8 @@ variable (see makunbound)"))
     ;; Better to check on shell creation and bail early (leaving no
     ;; shell behind).
     (with-current-buffer shell-buffer
+      ;; Apply dir-local variables in agent-shell buffer
+      (hack-dir-local-variables-non-file-buffer)
       (unless (and (map-elt config :client-maker)
                    (funcall (map-elt config :client-maker) (current-buffer)))
         (kill-buffer shell-buffer)
@@ -3274,8 +3282,12 @@ Session events:
     :data contains :tool-call-id and :tool-call
   `file-write'          - File written via fs/write_text_file
     :data contains :path and :content
+  `permission-request'  - Permission prompt displayed to user
+    :data contains :request-id, :tool-call-id, :tool-call
   `permission-response' - Permission response sent
     :data contains :request-id, :tool-call-id, :option-id, :cancelled
+  `turn-complete'       - Agent turn finished and prompt ready for input
+    :data contains :stop-reason and :usage
 
 Returns a subscription token for use with `agent-shell-unsubscribe'.
 
@@ -4261,6 +4273,10 @@ If FILE-PATH is not an image, returns nil."
                        (agent-shell--display-pending-requests))
                      (shell-maker-finish-output :config shell-maker--config
                                                 :success t)
+                     (agent-shell--emit-event
+                      :event 'turn-complete
+                      :data (list (cons :stop-reason (map-elt acp-response 'stopReason))
+                                  (cons :usage (map-elt (agent-shell--state) :usage))))
                      ;; Update viewport header (longer busy)
                      (when-let ((viewport-buffer (agent-shell-viewport--buffer
                                                   :shell-buffer shell-buffer
