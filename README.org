@@ -199,7 +199,7 @@ Pass environment variables to the spawned agent process by customizing the `agen
 #+begin_src emacs-lisp
 (setq agent-shell-anthropic-claude-environment
       (agent-shell-make-environment-variables
-       "ANTHROPIC_API_KEY" (auth-source-pass-get "secret" "anthropic-api-key")
+       "ANTHROPIC_API_KEY" (auth-source-pass-get 'secret "anthropic-api-key")
        "HTTPS_PROXY" "http://proxy.example.com:8080"))
 #+end_src
 
@@ -208,7 +208,7 @@ Pass environment variables to the spawned agent process by customizing the `agen
 By default, the agent process starts with a minimal environment. To inherit environment variables from the parent Emacs process, use the `:inherit-env t` parameter in `agent-shell-make-environment-variables`:
 
 #+begin_src emacs-lisp
-  (setenv "ANTHROPIC_API_KEY" (auth-source-pass-get "secret" "anthropic-api-key"))
+  (setenv "ANTHROPIC_API_KEY" (auth-source-pass-get 'secret "anthropic-api-key"))
 
   (setq agent-shell-anthropic-claude-environment
         (agent-shell-make-environment-variables :inherit-env t))
@@ -255,7 +255,7 @@ For API key authentication:
 ;; With function
 (setq agent-shell-anthropic-authentication
       (agent-shell-anthropic-make-authentication
-       :api-key (lambda () (auth-source-pass-get "secret" "anthropic-api-key"))))
+       :api-key (lambda () (auth-source-pass-get 'secret "anthropic-api-key"))))
 #+end_src
 
 For alternative Anthropic-compatible API endpoints, configure via environment variables:
@@ -287,7 +287,7 @@ For API key authentication:
 ;; With function
 (setq agent-shell-google-authentication
       (agent-shell-google-make-authentication
-       :api-key (lambda () (auth-source-pass-get "secret" "google-api-key"))))
+       :api-key (lambda () (auth-source-pass-get 'secret "google-api-key"))))
 #+end_src
 
 For Vertex AI authentication:
@@ -316,7 +316,7 @@ For API key authentication:
 ;; With function
 (setq agent-shell-openai-authentication
       (agent-shell-openai-make-authentication
-       :api-key (lambda () (auth-source-pass-get "secret" "openai-api-key"))))
+       :api-key (lambda () (auth-source-pass-get 'secret "openai-api-key"))))
 #+end_src
 
 *** Goose
@@ -331,7 +331,7 @@ For OpenAI API key authentication:
 ;; With function
 (setq agent-shell-goose-authentication
       (agent-shell-make-goose-authentication
-       :openai-api-key (lambda () (auth-source-pass-get "secret" "openai-api-key"))))
+       :openai-api-key (lambda () (auth-source-pass-get 'secret "openai-api-key"))))
 #+end_src
 
 *** Qwen Code
