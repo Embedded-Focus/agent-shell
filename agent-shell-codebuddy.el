@@ -63,7 +63,7 @@ Returns an agent configuration alist using `agent-shell-make-agent-config'."
    :buffer-name "CodeBuddy"
    :shell-prompt "CodeBuddy> "
    :shell-prompt-regexp "CodeBuddy> "
-   :icon-name "codebuddy.png"
+   :icon-name nil
    :welcome-function #'agent-shell-codebuddy--welcome-message
    :client-maker (lambda (buffer)
                    (agent-shell-codebuddy-make-client :buffer buffer))

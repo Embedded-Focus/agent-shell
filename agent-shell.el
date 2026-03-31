@@ -3584,7 +3584,8 @@ When provided, included in help-echo tooltips."
 (defun agent-shell--image-type-to-mime (filename)
   "Convert image type from FILENAME to MIME type string.
 Returns a MIME type like \"image/png\" or \"image/jpeg\"."
-  (when-let ((type (image-supported-file-p filename)))
+  (when-let ((type (and (stringp filename)
+                        (image-supported-file-p filename))))
     (pcase type
       ('svg "image/svg+xml")
       (_ (format "image/%s" type)))))
