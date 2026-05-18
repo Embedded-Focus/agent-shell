@@ -797,12 +797,12 @@ always go to Evil modes if you need to with ~C-z~).
 | agent-shell-permission-icon                   | Icon displayed when shell commands require permission to execute.               |
 | agent-shell-pi-acp-command                    | Command and parameters for the Pi ACP client.                                   |
 | agent-shell-pi-environment                    | Environment variables for the Pi client.                                        |
-| agent-shell-prefer-session-resume             | Prefer ACP session resume over session load when both are available.            |
 | agent-shell-prefer-viewport-interaction       | Non-nil makes ‘agent-shell’ prefer viewport interaction over shell interaction. |
 | agent-shell-preferred-agent-config            | Default agent to use for all new shells.                                        |
 | agent-shell-qwen-acp-command                  | Command and parameters for the Qwen Code client.                                |
 | agent-shell-qwen-authentication               | Configuration for Qwen Code authentication.                                     |
 | agent-shell-qwen-environment                  | Environment variables for the Qwen Code client.                                 |
+| agent-shell-restore-context                   | How much prior context to show when restoring a session.                        |
 | agent-shell-screenshot-command                | The program to use for capturing screenshots.                                   |
 | agent-shell-section-functions                 | Abnormal hook run after overlays are applied (experimental).                    |
 | agent-shell-session-strategy                  | How to handle sessions when starting a new shell.                               |

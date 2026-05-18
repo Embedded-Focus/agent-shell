@@ -2735,5 +2735,131 @@ and it must handle that cleanly."
   (should (equal "" (agent-shell-trim "")))
   (should (equal "" (agent-shell-trim "\n\n  \t  \n\n"))))
 
+(defun agent-shell-tests--make-session-update (kind text)
+  "Build a fake `session/update' notification of KIND with TEXT.
+KIND is a sessionUpdate string such as \"user_message_chunk\"."
+  `((method . "session/update")
+    (params . ((update . ((sessionUpdate . ,kind)
+                          (content . ((type . "text")
+                                      (text . ,text))))))))
+)
+
+(ert-deftest agent-shell--restore-summary-picks-first-user-and-last-agent ()
+  "Test summary accumulation keeps first user prompt and last agent reply."
+  (let ((state (list (cons :restore-summary nil))))
+    (agent-shell--restore-summary-init state)
+    (dolist (notif (list
+                    (agent-shell-tests--make-session-update "user_message_chunk" "Hello ")
+                    (agent-shell-tests--make-session-update "user_message_chunk" "world")
+                    (agent-shell-tests--make-session-update "agent_message_chunk" "Hi ")
+                    (agent-shell-tests--make-session-update "agent_message_chunk" "there")
+                    (agent-shell-tests--make-session-update "user_message_chunk" "second prompt")
+                    (agent-shell-tests--make-session-update "agent_message_chunk" "intermediate")
+                    (agent-shell-tests--make-session-update "tool_call" "ignored")
+                    (agent-shell-tests--make-session-update "agent_message_chunk" "final answer")))
+      (agent-shell--restore-summary-handle-notification state notif))
+    (agent-shell--restore-summary-commit-in-flight
+     (map-elt state :restore-summary))
+    (should (equal (map-elt (map-elt state :restore-summary) :first-user)
+                   "Hello world"))
+    (should (equal (map-elt (map-elt state :restore-summary) :last-agent)
+                   "final answer"))))
+
+(ert-deftest agent-shell--restore-summary-handles-non-text-content ()
+  "Test summary accumulator falls back to a placeholder for non-text content."
+  (let ((state (list (cons :restore-summary nil))))
+    (agent-shell--restore-summary-init state)
+    (agent-shell--restore-summary-handle-notification
+     state
+     '((method . "session/update")
+       (params . ((update . ((sessionUpdate . "user_message_chunk")
+                             (content . ((type . "image")))))))))
+    (agent-shell--restore-summary-commit-in-flight
+     (map-elt state :restore-summary))
+    (should (equal (map-elt (map-elt state :restore-summary) :first-user)
+                   "[image]"))))
+
+(ert-deftest agent-shell--use-session-load-p-modes ()
+  "Test `agent-shell--use-session-load-p' across context/protocol combinations."
+  ;; summary mode forces session/load when supported
+  (let ((agent-shell-restore-context 'summary))
+    (should (agent-shell--use-session-load-p
+             '((:supports-session-load . t)
+               (:supports-session-resume . t))))
+    ;; summary falls back to resume when load unsupported
+    (should-not (agent-shell--use-session-load-p
+                 '((:supports-session-load . nil)
+                   (:supports-session-resume . t)))))
+  ;; full mode forces session/load when supported
+  (let ((agent-shell-restore-context 'full))
+    (should (agent-shell--use-session-load-p
+             '((:supports-session-load . t)
+               (:supports-session-resume . t)))))
+  ;; minimal mode prefers resume when available
+  (let ((agent-shell-restore-context 'minimal))
+    (should-not (agent-shell--use-session-load-p
+                 '((:supports-session-load . t)
+                   (:supports-session-resume . t))))
+    ;; minimal falls back to load when resume unavailable
+    (should (agent-shell--use-session-load-p
+             '((:supports-session-load . t)
+               (:supports-session-resume . nil))))))
+
+(ert-deftest agent-shell--initiate-session-summary-mode-uses-session-load ()
+  "Test that `summary' mode bypasses `session/resume' in favor of `session/load'."
+  (with-temp-buffer
+    (let* ((agent-shell-session-strategy 'latest)
+           (agent-shell-restore-context 'summary)
+           (requests '())
+           (session-init-called nil)
+           (state (list (cons :buffer (current-buffer))
+                        (cons :client 'test-client)
+                        (cons :session (list (cons :id nil)
+                                             (cons :mode-id nil)
+                                             (cons :modes nil)))
+                        (cons :supports-session-list t)
+                        (cons :supports-session-load t)
+                        (cons :supports-session-resume t)
+                        (cons :restore-summary nil)
+                        (cons :active-requests nil)
+                        (cons :event-subscriptions nil))))
+      (setq-local agent-shell--state state)
+      (cl-letf (((symbol-function 'agent-shell--state)
+                 (lambda () agent-shell--state))
+                ((symbol-function 'agent-shell--update-fragment)
+                 (lambda (&rest _args) nil))
+                ((symbol-function 'agent-shell--update-header-and-mode-line)
+                 (lambda () nil))
+                ((symbol-function 'agent-shell-cwd)
+                 (lambda () "/tmp"))
+                ((symbol-function 'agent-shell--resolve-path)
+                 (lambda (path) path))
+                ((symbol-function 'agent-shell--mcp-servers)
+                 (lambda () []))
+                ((symbol-function 'acp-send-request)
+                 (lambda (&rest args)
+                   (push args requests)
+                   (let* ((request (plist-get args :request))
+                          (method (map-elt request :method)))
+                     (pcase method
+                       ("session/list"
+                        (funcall (plist-get args :on-success)
+                                 '((sessions . [((sessionId . "session-abc")
+                                                 (cwd . "/tmp")
+                                                 (title . "Some session"))]))))
+                       ("session/load"
+                        (funcall (plist-get args :on-success) '()))
+                       (_ (error "Unexpected method: %s" method)))))))
+        (agent-shell--initiate-session
+         :shell-buffer (current-buffer)
+         :on-session-init (lambda ()
+                            (setq session-init-called t)))
+        (should (equal (mapcar (lambda (req)
+                                 (map-elt (plist-get req :request) :method))
+                               (nreverse requests))
+                       '("session/list" "session/load")))
+        (should session-init-called)
+        (should-not (map-elt agent-shell--state :restore-summary))))))
+
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here

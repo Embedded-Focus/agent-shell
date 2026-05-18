@@ -636,6 +636,30 @@ When non-nil (and supported by agent), prefer ACP session resumes over loading."
   :type 'boolean
   :group 'agent-shell)
 
+(make-obsolete-variable 'agent-shell-prefer-session-resume
+                        'agent-shell-restore-context
+                        "agent-shell 0.52")
+
+(defcustom agent-shell-restore-context 'minimal
+  "How much prior context to show when restoring a session.
+
+  `minimal': Show only the session title (default).  Uses
+             `session/resume' when supported (no message replay),
+             so restore is fast and quiet.
+  `summary': Use `session/load' and, when the replay completes,
+             render the initial user prompt and the last agent
+             text response.  Other notifications (tool calls,
+             thoughts) are suppressed during restore.
+  `full':    Use `session/load' and replay the entire conversation.
+
+`summary' and `full' both require the agent to advertise
+`session/load' support.  When unavailable, restore falls back
+to `minimal' behavior."
+  :type '(choice (const :tag "Title only (minimal)" minimal)
+                 (const :tag "First prompt + last response (summary)" summary)
+                 (const :tag "Full replay" full))
+  :group 'agent-shell)
+
 (defcustom agent-shell-session-strategy 'prompt
   "How to handle sessions when starting a new shell.
 
@@ -822,6 +846,7 @@ OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
         (cons :supports-session-fork nil)
         (cons :resume-session-id nil)
         (cons :fork-session-id nil)
+        (cons :restore-summary nil)
         (cons :prompt-capabilities nil)
         (cons :event-subscriptions nil)
         (cons :idle-timer nil)
@@ -1603,6 +1628,11 @@ COMMAND, when present, may be a shell command string or an argv vector."
   (map-put! state :last-activity-time (current-time))
   (cond ((equal (map-elt acp-notification 'method) "session/update")
          (cond
+          ;; Restore-summary mode: buffer chunks during session/load
+          ;; and suppress normal rendering.  The summary fragments are
+          ;; emitted once the load completes.
+          ((map-elt state :restore-summary)
+           (agent-shell--restore-summary-handle-notification state acp-notification))
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "tool_call")
            ;; Notification is out of context (session/prompt finished).
            ;; Cannot derive where to display, so show in minibuffer.
@@ -4790,6 +4820,118 @@ Falls back to latest session in batch mode (e.g. tests)."
    :on-failure (agent-shell--make-error-handler
                 :state agent-shell--state :shell-buffer shell-buffer)))
 
+(defun agent-shell--use-session-load-p (state)
+  "Return non-nil when STATE should restore via `session/load'.
+
+`agent-shell-restore-context' decides the protocol:
+
+  `summary' and `full' force `session/load' when the agent
+  advertises it (so a replay is available to read from); they
+  fall back to `session/resume' otherwise.
+
+  `minimal' uses `session/resume' when available, falling back
+  to `session/load' only if the agent doesn't support resume."
+  (cond
+   ((and (memq agent-shell-restore-context '(summary full))
+         (map-elt state :supports-session-load))
+    t)
+   ((map-elt state :supports-session-resume)
+    nil)
+   (t
+    (map-elt state :supports-session-load))))
+
+(defun agent-shell--restore-summary-mode-p (state)
+  "Return non-nil when STATE should accumulate a restore summary.
+
+Only true when `agent-shell-restore-context' is `summary' and the
+agent supports `session/load' (so a replay is available to read
+from)."
+  (and (eq agent-shell-restore-context 'summary)
+       (map-elt state :supports-session-load)))
+
+(defun agent-shell--restore-summary-init (state)
+  "Initialize the restore-summary accumulator on STATE."
+  (map-put! state :restore-summary
+            (list (cons :current-kind nil)
+                  (cons :current-text nil)
+                  (cons :first-user nil)
+                  (cons :last-agent nil))))
+
+(defun agent-shell--restore-summary-commit-in-flight (summary)
+  "Commit the in-flight chunk of SUMMARY to first-user or last-agent.
+
+The first user message is preserved across commits.  The agent
+message is overwritten on each commit so the latest reply wins."
+  (let ((kind (map-elt summary :current-kind))
+        (text (map-elt summary :current-text)))
+    (when (and kind text (not (string-empty-p text)))
+      (pcase kind
+        ('user
+         (unless (map-elt summary :first-user)
+           (map-put! summary :first-user text)))
+        ('agent
+         (map-put! summary :last-agent text))))
+    (map-put! summary :current-kind nil)
+    (map-put! summary :current-text nil)))
+
+(defun agent-shell--restore-summary-append (summary kind text)
+  "Append TEXT to SUMMARY's in-flight chunk, switching to KIND if needed.
+
+KIND is `user' or `agent'.  When KIND differs from the current
+in-flight kind, the previous chunk is committed first."
+  (unless (eq (map-elt summary :current-kind) kind)
+    (agent-shell--restore-summary-commit-in-flight summary)
+    (map-put! summary :current-kind kind)
+    (map-put! summary :current-text ""))
+  (map-put! summary :current-text
+            (concat (map-elt summary :current-text) text)))
+
+(defun agent-shell--restore-summary-handle-notification (state acp-notification)
+  "Route ACP-NOTIFICATION into STATE's restore-summary accumulator.
+
+`user_message_chunk' and `agent_message_chunk' contribute text;
+any other `session/update' commits the in-flight chunk so the
+boundary between consecutive same-kind chunks is preserved."
+  (let* ((summary (map-elt state :restore-summary))
+         (update-type (map-nested-elt acp-notification '(params update sessionUpdate)))
+         (text (or (map-nested-elt acp-notification '(params update content text))
+                   (format "[%s]" (or (map-nested-elt acp-notification '(params update content type))
+                                      "unknown")))))
+    (pcase update-type
+      ("user_message_chunk"
+       (agent-shell--restore-summary-append summary 'user text))
+      ("agent_message_chunk"
+       (agent-shell--restore-summary-append summary 'agent text))
+      (_
+       (agent-shell--restore-summary-commit-in-flight summary)))))
+
+(defun agent-shell--render-restore-summary (state)
+  "Render the accumulated restore-summary fragments from STATE.
+
+Adds an `Initial prompt' fragment for the first user message and
+a `Last response' fragment for the latest agent text reply, then
+clears the summary state.  Does nothing if neither was captured."
+  (when-let ((summary (map-elt state :restore-summary)))
+    (agent-shell--restore-summary-commit-in-flight summary)
+    (when-let ((text (map-elt summary :first-user)))
+      (agent-shell--update-fragment
+       :state state
+       :namespace-id "bootstrapping"
+       :block-id "restore_summary_first_user"
+       :label-left (propertize "Initial prompt" 'font-lock-face 'font-lock-doc-markup-face)
+       :body text
+       :expanded t))
+    (when-let ((text (map-elt summary :last-agent)))
+      (agent-shell--update-fragment
+       :state state
+       :namespace-id "bootstrapping"
+       :block-id "restore_summary_last_agent"
+       :label-left (propertize "Last response" 'font-lock-face 'font-lock-doc-markup-face)
+       :body text
+       :expanded t
+       :render-body-images t))
+    (map-put! state :restore-summary nil)))
+
 (cl-defun agent-shell--initiate-session-resume-by-id (&key session-id session-title shell-buffer on-session-init)
   "Resume or load session SESSION-ID with SHELL-BUFFER and ON-SESSION-INIT.
 
@@ -4800,49 +4942,51 @@ SESSION-TITLE is an optional display title for the resumed session."
    :block-id "starting"
    :body (format "\n\nLoading session %s..." session-id)
    :append t)
-  (agent-shell--send-request
-   :state (agent-shell--state)
-   :client (map-elt (agent-shell--state) :client)
-   :request (let ((cwd (agent-shell--resolve-path (agent-shell-cwd)))
-                  (mcp-servers (agent-shell--mcp-servers)))
-              (let ((use-resume (if agent-shell-prefer-session-resume
-                                    (map-elt (agent-shell--state) :supports-session-resume)
-                                  (not (map-elt (agent-shell--state) :supports-session-load)))))
-                (if use-resume
-                    (acp-make-session-resume-request
+  (let ((use-load (agent-shell--use-session-load-p (agent-shell--state))))
+    (when (and use-load (agent-shell--restore-summary-mode-p (agent-shell--state)))
+      (agent-shell--restore-summary-init (agent-shell--state)))
+    (agent-shell--send-request
+     :state (agent-shell--state)
+     :client (map-elt (agent-shell--state) :client)
+     :request (let ((cwd (agent-shell--resolve-path (agent-shell-cwd)))
+                    (mcp-servers (agent-shell--mcp-servers)))
+                (if use-load
+                    (acp-make-session-load-request
                      :session-id session-id
                      :cwd cwd
                      :mcp-servers mcp-servers)
-                  (acp-make-session-load-request
+                  (acp-make-session-resume-request
                    :session-id session-id
                    :cwd cwd
-                   :mcp-servers mcp-servers))))
-   :buffer (current-buffer)
-   :on-success (lambda (acp-load-response)
-                 (agent-shell--set-session-from-response
-                  :acp-response acp-load-response
-                  :acp-session-id session-id)
-                 (agent-shell--update-fragment
-                  :state (agent-shell--state)
-                  :namespace-id "bootstrapping"
-                  :block-id "resumed_session"
-                  :label-left (format "%s %s"
-                                      (agent-shell--make-status-kind-label :status "completed")
-                                      (propertize "Resuming session" 'font-lock-face 'font-lock-doc-markup-face))
-                  :expanded t
-                  :body (or session-title session-id ""))
-                 (agent-shell--finalize-session-init :on-session-init on-session-init))
-   :on-failure (lambda (_acp-error _raw-message)
-                 (message "Couldn't resume session. Starting a new one.")
-                 (agent-shell--update-fragment
-                  :state (agent-shell--state)
-                  :namespace-id "bootstrapping"
-                  :block-id "starting"
-                  :body "\n\nCouldn't resume session."
-                  :append t)
-                 (agent-shell--initiate-session-list-and-load
-                  :shell-buffer shell-buffer
-                  :on-session-init on-session-init))))
+                   :mcp-servers mcp-servers)))
+     :buffer (current-buffer)
+     :on-success (lambda (acp-load-response)
+                   (agent-shell--set-session-from-response
+                    :acp-response acp-load-response
+                    :acp-session-id session-id)
+                   (agent-shell--update-fragment
+                    :state (agent-shell--state)
+                    :namespace-id "bootstrapping"
+                    :block-id "resumed_session"
+                    :label-left (format "%s %s"
+                                        (agent-shell--make-status-kind-label :status "completed")
+                                        (propertize "Resuming session" 'font-lock-face 'font-lock-doc-markup-face))
+                    :expanded t
+                    :body (or session-title session-id ""))
+                   (agent-shell--render-restore-summary (agent-shell--state))
+                   (agent-shell--finalize-session-init :on-session-init on-session-init))
+     :on-failure (lambda (_acp-error _raw-message)
+                   (map-put! (agent-shell--state) :restore-summary nil)
+                   (message "Couldn't resume session. Starting a new one.")
+                   (agent-shell--update-fragment
+                    :state (agent-shell--state)
+                    :namespace-id "bootstrapping"
+                    :block-id "starting"
+                    :body "\n\nCouldn't resume session."
+                    :append t)
+                   (agent-shell--initiate-session-list-and-load
+                    :shell-buffer shell-buffer
+                    :on-session-init on-session-init)))))
 
 (cl-defun agent-shell--initiate-session-fork-by-id (&key session-id shell-buffer on-session-init)
   "Fork session SESSION-ID with SHELL-BUFFER and ON-SESSION-INIT."
@@ -4919,30 +5063,30 @@ SESSION-TITLE is an optional display title for the resumed session."
                               :event 'session-selected
                               :data (list (cons :session-id acp-session-id)))
                              (if acp-session-id
-                                 (progn
+                                 (let ((use-load (agent-shell--use-session-load-p (agent-shell--state))))
                                    (agent-shell--update-fragment
                                     :state (agent-shell--state)
                                     :namespace-id "bootstrapping"
                                     :block-id "starting"
                                     :body (format "\n\nLoading session %s..." acp-session-id)
                                     :append t)
+                                   (when (and use-load
+                                              (agent-shell--restore-summary-mode-p (agent-shell--state)))
+                                     (agent-shell--restore-summary-init (agent-shell--state)))
                                    (agent-shell--send-request
                                     :state (agent-shell--state)
                                     :client (map-elt (agent-shell--state) :client)
                                     :request (let ((cwd (agent-shell--resolve-path (agent-shell-cwd)))
                                                    (mcp-servers (agent-shell--mcp-servers)))
-                                               (let ((use-resume (if agent-shell-prefer-session-resume
-                                                                     (map-elt (agent-shell--state) :supports-session-resume)
-                                                                   (not (map-elt (agent-shell--state) :supports-session-load)))))
-                                                 (if use-resume
-                                                     (acp-make-session-resume-request
-                                                      :session-id acp-session-id
-                                                      :cwd cwd
-                                                      :mcp-servers mcp-servers)
+                                               (if use-load
                                                    (acp-make-session-load-request
                                                     :session-id acp-session-id
                                                     :cwd cwd
-                                                    :mcp-servers mcp-servers))))
+                                                    :mcp-servers mcp-servers)
+                                                 (acp-make-session-resume-request
+                                                  :session-id acp-session-id
+                                                  :cwd cwd
+                                                  :mcp-servers mcp-servers)))
                                     :buffer (current-buffer)
                                     :on-success (lambda (acp-load-response)
                                                   (agent-shell--set-session-from-response
@@ -4957,8 +5101,10 @@ SESSION-TITLE is an optional display title for the resumed session."
                                                                        (propertize "Resuming session" 'font-lock-face 'font-lock-doc-markup-face))
                                                    :expanded t
                                                    :body (or (map-elt acp-session 'title) ""))
+                                                  (agent-shell--render-restore-summary (agent-shell--state))
                                                   (agent-shell--finalize-session-init :on-session-init on-session-init))
                                     :on-failure (lambda (_acp-error _raw-message)
+                                                  (map-put! (agent-shell--state) :restore-summary nil)
                                                   (agent-shell--update-fragment
                                                    :state (agent-shell--state)
                                                    :namespace-id "bootstrapping"
