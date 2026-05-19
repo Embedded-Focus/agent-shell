@@ -39,37 +39,28 @@
 
 ;;; Normalization
 
-(defun agent-shell--normalize-config-option-value (value)
-  "Normalize ACP config option VALUE to an internal alist.
-
-For example:
-
-  (agent-shell--normalize-config-option-value
-   \\='((value . \"ask\") (name . \"Ask\")))
-  => \\='((:value . \"ask\") (:name . \"Ask\") (:description . nil))"
-  `((:value . ,(map-elt value 'value))
-    (:name . ,(map-elt value 'name))
-    (:description . ,(map-elt value 'description))))
-
-(defun agent-shell--normalize-config-option (option)
-  "Normalize ACP config OPTION to an internal alist.
+(defun agent-shell--normalize-config-option (acp-option)
+  "Normalize ACP-OPTION (an ACP config option) to an internal alist.
 
 For example:
 
   (agent-shell--normalize-config-option
    \\='((id . \"mode\") (type . \"select\") (currentValue . \"ask\")))
   => \\='((:id . \"mode\") (:type . \"select\") (:current-value . \"ask\") ...)"
-  `((:id . ,(map-elt option 'id))
-    (:name . ,(map-elt option 'name))
-    (:description . ,(map-elt option 'description))
-    (:category . ,(map-elt option 'category))
-    (:type . ,(map-elt option 'type))
-    (:current-value . ,(map-elt option 'currentValue))
-    (:options . ,(mapcar #'agent-shell--normalize-config-option-value
-                         (append (map-elt option 'options) nil)))))
+  `((:id . ,(map-elt acp-option 'id))
+    (:name . ,(map-elt acp-option 'name))
+    (:description . ,(map-elt acp-option 'description))
+    (:category . ,(map-elt acp-option 'category))
+    (:type . ,(map-elt acp-option 'type))
+    (:current-value . ,(map-elt acp-option 'currentValue))
+    (:options . ,(mapcar (lambda (acp-value)
+                           `((:value . ,(map-elt acp-value 'value))
+                             (:name . ,(map-elt acp-value 'name))
+                             (:description . ,(map-elt acp-value 'description))))
+                         (append (map-elt acp-option 'options) nil)))))
 
-(defun agent-shell--normalize-config-options (config-options)
-  "Normalize ACP CONFIG-OPTIONS to internal alists.
+(defun agent-shell--normalize-config-options (acp-config-options)
+  "Normalize ACP-CONFIG-OPTIONS (ACP `configOptions') to internal alists.
 
 For example:
 
@@ -77,20 +68,31 @@ For example:
    \\='[((id . \"mode\") (type . \"select\") (currentValue . \"ask\"))])
   => \\='(((:id . \"mode\") (:type . \"select\") (:current-value . \"ask\") ...))"
   (mapcar #'agent-shell--normalize-config-option
-          (append config-options nil)))
+          (append acp-config-options nil)))
 
 ;;; State management
 
-(cl-defun agent-shell--save-config-options (&key state config-options)
-  "Save ACP CONFIG-OPTIONS in STATE as normalized session config state.
+(cl-defun agent-shell--save-config-options (&key state acp-config-options)
+  "Save ACP-CONFIG-OPTIONS in STATE as normalized session config state.
 
 Stores normalized options at both top-level :config-options and inside
 the :session alist for consistency."
-  (let ((normalized-options (agent-shell--normalize-config-options config-options)))
+  (let ((normalized-options (agent-shell--normalize-config-options acp-config-options)))
     (setf (map-elt state :config-options) normalized-options)
     (when-let ((session (map-elt state :session)))
       (setf (map-elt session :config-options) normalized-options)
       (setf (map-elt state :session) session))))
+
+(cl-defun agent-shell--config-option-set-value (&key state config-id value)
+  "In STATE, set the :current-value of config option CONFIG-ID to VALUE.
+
+Updates the option in place in both top-level :config-options and the
+copy under :session.  Used to keep local state in sync when an agent
+acknowledges a `session/set_config_option' without echoing the full
+configOptions list."
+  (dolist (option (agent-shell--config-options state))
+    (when (equal config-id (map-elt option :id))
+      (setf (map-elt option :current-value) value))))
 
 ;;; Accessors
 
@@ -105,15 +107,15 @@ For example:
   (or (map-nested-elt state '(:session :config-options))
       (map-elt state :config-options)))
 
-(defun agent-shell--config-option-by-id (state config-id)
-  "Return config option with CONFIG-ID from STATE, or nil.
+(cl-defun agent-shell--config-option-get (&key state id)
+  "Return config option with ID from STATE, or nil.
 
 For example:
 
-  (agent-shell--config-option-by-id state \"model\")
+  (agent-shell--config-option-get :state state :id \"model\")
   => \\='((:id . \"model\") (:type . \"select\") ...)"
   (seq-find (lambda (option)
-              (equal config-id (map-elt option :id)))
+              (equal id (map-elt option :id)))
             (agent-shell--config-options state)))
 
 (defun agent-shell--config-option-by-category (state category)
@@ -190,20 +192,6 @@ For example:
               (:description . ,(map-elt value :description))))
           (map-elt option :options)))
 
-;;; Category shortcuts
-
-(defun agent-shell--model-config-option (state)
-  "Return the model config option from STATE, if any.
-
-Shortcut for (agent-shell--config-option-by-category state \"model\")."
-  (agent-shell--config-option-by-category state "model"))
-
-(defun agent-shell--mode-config-option (state)
-  "Return the mode config option from STATE, if any.
-
-Shortcut for (agent-shell--config-option-by-category state \"mode\")."
-  (agent-shell--config-option-by-category state "mode"))
-
 ;;; Current value helpers
 
 (defun agent-shell--current-model-id (state)
@@ -211,7 +199,7 @@ Shortcut for (agent-shell--config-option-by-category state \"mode\")."
 
 Prefers config option with category \"model\", falls back to
 session :model-id."
-  (or (map-elt (agent-shell--model-config-option state) :current-value)
+  (or (map-elt (agent-shell--config-option-by-category state "model") :current-value)
       (map-nested-elt state '(:session :model-id))))
 
 (defun agent-shell--current-mode-id (state)
@@ -219,7 +207,7 @@ session :model-id."
 
 Prefers config option with category \"mode\", falls back to
 session :mode-id."
-  (or (map-elt (agent-shell--mode-config-option state) :current-value)
+  (or (map-elt (agent-shell--config-option-by-category state "mode") :current-value)
       (map-nested-elt state '(:session :mode-id))))
 
 (defun agent-shell--get-available-models (state)
@@ -227,7 +215,7 @@ session :mode-id."
 
 When a config option with category \"model\" exists, converts its
 values to legacy model shape.  Otherwise returns session :models."
-  (if-let ((model-option (agent-shell--model-config-option state)))
+  (if-let ((model-option (agent-shell--config-option-by-category state "model")))
       (agent-shell--config-option-as-models model-option)
     (map-nested-elt state '(:session :models))))
 

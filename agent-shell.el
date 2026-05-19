@@ -1805,7 +1805,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "config_option_update")
            (agent-shell--save-config-options
             :state state
-            :config-options (map-nested-elt acp-notification '(params update configOptions)))
+            :acp-config-options (map-nested-elt acp-notification '(params update configOptions)))
            (agent-shell--update-header-and-mode-line)
            ;; Note: No need to set :last-entry-type as no text was inserted.
            nil)
@@ -4063,29 +4063,10 @@ Must provide ON-AUTHENTICATED (lambda ())."
                      (funcall on-authenticated))
        :on-failure (agent-shell--make-error-handler
                     :state (agent-shell--state) :shell-buffer shell-buffer))
-     (shell-maker-write-output :config shell-maker--config
-                               :output "No :authenticate-request-maker")
-     (shell-maker-finish-output :config shell-maker--config
-                                :success nil)))
-
-(cl-defun agent-shell--make-session-set-config-option-request (&key session-id config-id value)
-  "Create a session/set_config_option request.
-
-For example:
-
-  (agent-shell--make-session-set-config-option-request
-   :session-id \"s1\" :config-id \"mode\" :value \"ask\")
-
-returns a request whose params contain sessionId, configId, and value."
-  (if (fboundp 'acp-make-session-set-config-option-request)
-      (funcall 'acp-make-session-set-config-option-request
-               :session-id session-id
-               :config-id config-id
-               :value value)
-    `((:method . "session/set_config_option")
-      (:params . ((sessionId . ,session-id)
-                  (configId . ,config-id)
-                  (value . ,value))))))
+    (shell-maker-write-output :config shell-maker--config
+                              :output "No :authenticate-request-maker")
+    (shell-maker-finish-output :config shell-maker--config
+                               :success nil)))
 
 (cl-defun agent-shell--set-session-config-option (&key config-id value on-success on-failure)
   "Set session config option CONFIG-ID to VALUE.
@@ -4093,15 +4074,20 @@ Call ON-SUCCESS after state is updated from the response."
   (agent-shell--send-request
    :state (agent-shell--state)
    :client (map-elt (agent-shell--state) :client)
-   :request (agent-shell--make-session-set-config-option-request
+   :request (acp-make-session-set-config-option-request
              :session-id (map-nested-elt (agent-shell--state) '(:session :id))
              :config-id config-id
              :value value)
    :buffer (current-buffer)
    :on-success (lambda (acp-response)
-                 (agent-shell--save-config-options
-                  :state (agent-shell--state)
-                  :config-options (map-elt acp-response 'configOptions))
+                 (if (map-elt acp-response 'configOptions)
+                     (agent-shell--save-config-options
+                      :state (agent-shell--state)
+                      :acp-config-options (map-elt acp-response 'configOptions))
+                   (agent-shell--config-option-set-value
+                    :state (agent-shell--state)
+                    :config-id config-id
+                    :value value))
                  (agent-shell--update-header-and-mode-line)
                  (when on-success
                    (funcall on-success)))
@@ -4109,9 +4095,9 @@ Call ON-SUCCESS after state is updated from the response."
                    (lambda (acp-error _raw-message)
                      (message "Failed to change config option: %s" acp-error)))))
 
-(cl-defun agent-shell--set-model-id (&key model-id on-success on-failure)
+(cl-defun agent-shell--config-option-set-model-id (&key model-id on-success on-failure)
   "Set current model to MODEL-ID."
-  (if-let ((model-option (agent-shell--model-config-option (agent-shell--state))))
+  (if-let ((model-option (agent-shell--config-option-by-category (agent-shell--state) "model")))
       (agent-shell--set-session-config-option
        :config-id (map-elt model-option :id)
        :value model-id
@@ -4145,9 +4131,9 @@ Call ON-SUCCESS after state is updated from the response."
                      (lambda (acp-error _raw-message)
                        (message "Failed to change model: %s" acp-error))))))
 
-(cl-defun agent-shell--set-mode-id (&key mode-id on-success on-failure)
+(cl-defun agent-shell--config-option-set-mode-id (&key mode-id on-success on-failure)
   "Set current session mode to MODE-ID."
-  (if-let ((mode-option (agent-shell--mode-config-option (agent-shell--state))))
+  (if-let ((mode-option (agent-shell--config-option-by-category (agent-shell--state) "mode")))
       (agent-shell--set-session-config-option
        :config-id (map-elt mode-option :id)
        :value mode-id
@@ -4191,7 +4177,7 @@ Call ON-MODEL-CHANGED on success."
        :block-id "set-model"
        :label-left (propertize "Setting model" 'font-lock-face 'font-lock-doc-markup-face)
        :body (format "Requesting %s..." model-id)))
-    (agent-shell--set-model-id
+    (agent-shell--config-option-set-model-id
      :model-id model-id
      :on-success (lambda ()
                    (agent-shell--update-fragment
@@ -4217,7 +4203,7 @@ Call ON-MODE-CHANGED on success."
        :block-id "set-session-mode"
        :label-left (propertize "Setting session mode" 'font-lock-face 'font-lock-doc-markup-face)
        :body (format "Requesting %s..." mode-id)))
-    (agent-shell--set-mode-id
+    (agent-shell--config-option-set-mode-id
      :mode-id mode-id
      :on-success (lambda ()
                    (agent-shell--update-fragment
@@ -4495,7 +4481,7 @@ Falls back to latest session in batch mode (e.g. tests)."
                       :acp-session-id acp-session-id))
   (agent-shell--save-config-options
    :state agent-shell--state
-   :config-options (map-elt acp-response 'configOptions)))
+   :acp-config-options (map-elt acp-response 'configOptions)))
 
 (defun agent-shell--display-session-options ()
   "Display available session options during bootstrapping."
@@ -4507,17 +4493,15 @@ Falls back to latest session in batch mode (e.g. tests)."
      :label-left (propertize "Available config options" 'font-lock-face 'font-lock-doc-markup-face)
      :body (agent-shell--format-available-config-options
             (agent-shell--config-options agent-shell--state))))
-  (when (and (map-nested-elt agent-shell--state '(:session :models))
-             (not (agent-shell--model-config-option agent-shell--state)))
+  (when (agent-shell--get-available-models agent-shell--state)
     (agent-shell--update-fragment
      :state agent-shell--state
      :namespace-id "bootstrapping"
      :block-id "available_models"
      :label-left (propertize "Available models" 'font-lock-face 'font-lock-doc-markup-face)
      :body (agent-shell--format-available-models
-            (map-nested-elt agent-shell--state '(:session :models)))))
-  (when (and (agent-shell--get-available-modes agent-shell--state)
-             (not (agent-shell--mode-config-option agent-shell--state)))
+            (agent-shell--get-available-models agent-shell--state))))
+  (when (agent-shell--get-available-modes agent-shell--state)
     (agent-shell--update-fragment
      :state agent-shell--state
      :namespace-id "bootstrapping"
@@ -4559,7 +4543,7 @@ Falls back to latest session in batch mode (e.g. tests)."
                                      :acp-session-id (map-elt acp-response 'sessionId)))
                  (agent-shell--save-config-options
                   :state agent-shell--state
-                  :config-options (map-elt acp-response 'configOptions))
+                  :acp-config-options (map-elt acp-response 'configOptions))
                  (agent-shell--update-fragment
                   :state agent-shell--state
                   :block-id "starting"
@@ -6508,8 +6492,6 @@ When DEACTIVATE is non-nil, deactivate region/selection."
 
 ;;; Session modes
 
-;;; Session modes
-
 (defun agent-shell--get-available-modes (state)
   "Get available modes list, preferring session modes over agent modes.
 
@@ -6517,7 +6499,7 @@ STATE is the agent shell state.
 
 Returns the modes list from session if available, otherwise from
 the agent's available modes."
-  (if-let ((mode-option (agent-shell--mode-config-option state)))
+  (if-let ((mode-option (agent-shell--config-option-by-category state "mode")))
       (agent-shell--config-option-as-modes mode-option)
     (or (map-nested-elt state '(:session :modes))
         ;; Use agent-level availability as fallback.
@@ -6583,15 +6565,15 @@ For example: clicking \"[Sonnet]\" shows a popup with all available models."
         (shell-buffer (agent-shell--shell-buffer)))
     (seq-do
      (lambda (model)
-        (define-key menu (vector (intern (concat "model-" (map-elt model :model-id))))
-                    `(menu-item ,(map-elt model :name)
-                                (lambda () (interactive)
-                                  (with-current-buffer ,shell-buffer
-                                    (agent-shell--set-model-id
-                                     :model-id ,(map-elt model :model-id))))
-                                :button (:toggle . ,(equal (map-elt model :model-id)
-                                                           (agent-shell--current-model-id (agent-shell--state)))))))
-      (reverse (agent-shell--get-available-models (agent-shell--state))))
+       (define-key menu (vector (intern (concat "model-" (map-elt model :model-id))))
+                   `(menu-item ,(map-elt model :name)
+                               (lambda () (interactive)
+                                 (with-current-buffer ,shell-buffer
+                                   (agent-shell--config-option-set-model-id
+                                    :model-id ,(map-elt model :model-id))))
+                               :button (:toggle . ,(equal (map-elt model :model-id)
+                                                          (agent-shell--current-model-id (agent-shell--state)))))))
+     (reverse (agent-shell--get-available-models (agent-shell--state))))
     menu))
 
 (defun agent-shell--mode-line-mode-menu ()
@@ -6602,14 +6584,14 @@ For example: clicking \"[Accept Edits]\" shows a popup with all available modes.
         (shell-buffer (agent-shell--shell-buffer)))
     (seq-do
      (lambda (mode)
-        (define-key menu (vector (intern (concat "mode-" (map-elt mode :id))))
-                    `(menu-item ,(map-elt mode :name)
-                                (lambda () (interactive)
-                                  (with-current-buffer ,shell-buffer
-                                    (agent-shell--set-mode-id
-                                     :mode-id ,(map-elt mode :id))))
-                                :button (:toggle . ,(equal (map-elt mode :id)
-                                                           (agent-shell--current-mode-id (agent-shell--state)))))))
+       (define-key menu (vector (intern (concat "mode-" (map-elt mode :id))))
+                   `(menu-item ,(map-elt mode :name)
+                               (lambda () (interactive)
+                                 (with-current-buffer ,shell-buffer
+                                   (agent-shell--config-option-set-mode-id
+                                    :mode-id ,(map-elt mode :id))))
+                               :button (:toggle . ,(equal (map-elt mode :id)
+                                                          (agent-shell--current-mode-id (agent-shell--state)))))))
      (reverse (agent-shell--get-available-modes (agent-shell--state))))
     menu))
 
@@ -6687,11 +6669,11 @@ Optionally, get notified of completion with ON-SUCCESS function."
                              (map-elt mode :id))
                            (agent-shell--get-available-modes (agent-shell--state))))
          (mode-idx (or (seq-position mode-ids
-                                      (agent-shell--current-mode-id (agent-shell--state))
-                                      #'string=) -1))
+                                     (agent-shell--current-mode-id (agent-shell--state))
+                                     #'string=) -1))
          (next-mode-idx (mod (1+ mode-idx) (length mode-ids)))
          (next-mode-id (nth next-mode-idx mode-ids)))
-    (agent-shell--set-mode-id
+    (agent-shell--config-option-set-mode-id
      :mode-id next-mode-id
      :on-success on-success)))
 
@@ -6726,7 +6708,7 @@ Optionally, get notified of completion with ON-SUCCESS function."
       (user-error "Unknown session mode: %s" selection))
     (when (and current-mode-id (string= selected-mode-id current-mode-id))
       (error "Session mode already %s" selection))
-    (agent-shell--set-mode-id
+    (agent-shell--config-option-set-mode-id
      :mode-id selected-mode-id
      :on-success on-success)))
 
@@ -6776,7 +6758,7 @@ Optionally, get notified of completion with ON-SUCCESS function."
                                                              (string= (map-elt model :model-id) selected-model-id))
                                                            available-models)
                                                  :name)))
-    (agent-shell--set-model-id
+    (agent-shell--config-option-set-model-id
      :model-id selected-model-id
      :on-success on-success)))
 
@@ -6868,7 +6850,7 @@ with ON-SUCCESS function."
             (concat name "\n" desc)
           name)))
     models)
-    "\n\n"))
+   "\n\n"))
 
 ;;; Transient
 
