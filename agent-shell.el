@@ -1873,9 +1873,11 @@ COMMAND, when present, may be a shell command string or an argv vector."
                   (when-let ((diff (agent-shell--make-diff-info
                                     :acp-tool-call (map-nested-elt acp-request '(params toolCall)))))
                     (list (cons :diff diff)))))
-         (unless (and (functionp agent-shell-permission-responder-function)
+         (let* ((tool-call-id (map-nested-elt acp-request '(params toolCall toolCallId)))
+                (permission-handled
+                 (and (functionp agent-shell-permission-responder-function)
                       (funcall agent-shell-permission-responder-function
-                               (list (cons :tool-call (map-nested-elt state (list :tool-calls (map-nested-elt acp-request '(params toolCall toolCallId)))))
+                               (list (cons :tool-call (map-nested-elt state (list :tool-calls tool-call-id)))
                                      (cons :options (agent-shell--make-permission-actions
                                                      (map-nested-elt acp-request '(params options))))
                                      (cons :respond (lambda (option-id)
@@ -1884,43 +1886,43 @@ COMMAND, when present, may be a shell command string or an argv vector."
                                                        :request-id (map-elt acp-request 'id)
                                                        :option-id option-id
                                                        :state state
-                                                       :tool-call-id (map-nested-elt acp-request '(params toolCall toolCallId)))
-                                                      t)))))
-           (when (map-nested-elt acp-request '(params toolCall rawInput plan))
+                                                       :tool-call-id tool-call-id)
+                                                      t)))))))
+           (unless permission-handled
+             (when (map-nested-elt acp-request '(params toolCall rawInput plan))
+               (agent-shell--update-fragment
+                :state state
+                :block-id (concat tool-call-id "-plan")
+                :label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
+                :body (agent-shell--format-plan (map-nested-elt acp-request '(params toolCall rawInput plan)))
+                :expanded t))
+             ;; block-id must be the same as the one used
+             ;; in agent-shell--delete-fragment param.
              (agent-shell--update-fragment
               :state state
-              :block-id (concat (map-nested-elt acp-request '(params toolCall toolCallId)) "-plan")
-              :label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
-              :body (agent-shell--format-plan (map-nested-elt acp-request '(params toolCall rawInput plan)))
-              :expanded t))
-           ;; block-id must be the same as the one used
-           ;; in agent-shell--delete-fragment param.
-           (agent-shell--update-fragment
-            :state state
-            :block-id (format "permission-%s" (map-nested-elt acp-request '(params toolCall toolCallId)))
-            :body (with-current-buffer (map-elt state :buffer)
-                    (agent-shell--make-tool-call-permission-text
-                     :acp-request acp-request
-                     :client (map-elt state :client)
-                     :state state))
-            :expanded t
-            :navigation 'never)
-           (agent-shell-jump-to-latest-permission-button-row)
-           (when-let (((map-elt state :buffer))
-                      (viewport-buffer (agent-shell-viewport--buffer
-                                        :shell-buffer (map-elt state :buffer)
-                                        :existing-only t)))
-             (with-current-buffer viewport-buffer
-               (agent-shell-jump-to-latest-permission-button-row))))
-         (let* ((tool-call-id (map-nested-elt acp-request '(params toolCall toolCallId)))
-                (data (list (cons :request-id (map-elt acp-request 'id))
-                            (cons :tool-call-id tool-call-id)
-                            (cons :tool-call (map-nested-elt state (list :tool-calls tool-call-id))))))
-           (agent-shell--emit-event
-            :event 'permission-request
-            :data data)
-           (agent-shell--start-idle-timer :event 'permission-request :data data))
-         (map-put! state :last-entry-type "session/request_permission"))
+              :block-id (format "permission-%s" tool-call-id)
+              :body (with-current-buffer (map-elt state :buffer)
+                      (agent-shell--make-tool-call-permission-text
+                       :acp-request acp-request
+                       :client (map-elt state :client)
+                       :state state))
+              :expanded t
+              :navigation 'never)
+             (agent-shell-jump-to-latest-permission-button-row)
+             (when-let (((map-elt state :buffer))
+                        (viewport-buffer (agent-shell-viewport--buffer
+                                          :shell-buffer (map-elt state :buffer)
+                                          :existing-only t)))
+               (with-current-buffer viewport-buffer
+                 (agent-shell-jump-to-latest-permission-button-row)))
+             (let ((data (list (cons :request-id (map-elt acp-request 'id))
+                               (cons :tool-call-id tool-call-id)
+                               (cons :tool-call (map-nested-elt state (list :tool-calls tool-call-id))))))
+               (agent-shell--emit-event
+                :event 'permission-request
+                :data data)
+               (agent-shell--start-idle-timer :event 'permission-request :data data))
+             (map-put! state :last-entry-type "session/request_permission"))))
         ((equal (map-elt acp-request 'method) "fs/read_text_file")
          (agent-shell--on-fs-read-text-file-request
           :state state

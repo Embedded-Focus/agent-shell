@@ -2302,6 +2302,7 @@ code block content
   "Test `agent-shell--on-request' calls handler and :respond auto-approves."
   (with-temp-buffer
     (let* ((responded-option-id nil)
+           (received-events nil)
            (handler-received nil)
            (agent-shell-permission-responder-function
             (lambda (request)
@@ -2330,6 +2331,11 @@ code block content
                 ((symbol-function 'agent-shell--send-permission-response)
                  (lambda (&rest args)
                    (setq responded-option-id (plist-get args :option-id)))))
+        (agent-shell-subscribe-to
+         :shell-buffer (current-buffer)
+         :event 'permission-request
+         :on-event (lambda (event)
+                     (push event received-events)))
         (agent-shell--on-request
          :state state
          :acp-request `((id . "req-1")
@@ -2348,7 +2354,9 @@ code block content
         (should (equal (map-elt (map-elt handler-received :tool-call) :kind) "read"))
         (should (equal (map-elt (map-elt handler-received :tool-call) :title) "Read file"))
         (should (= (length (map-elt handler-received :options)) 2))
-        (should (equal responded-option-id "opt-allow"))))))
+        (should (equal responded-option-id "opt-allow"))
+        (should-not received-events)
+        (should-not (map-elt state :idle-timer))))))
 
 (ert-deftest agent-shell--on-request-handler-nil-leaves-prompt-test ()
   "Test `agent-shell--on-request' leaves interactive prompt when handler returns nil."
