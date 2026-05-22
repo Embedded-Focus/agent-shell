@@ -1312,6 +1312,7 @@ If DELETE is non-nil, delete the text between START and END."
   "C-c C-m" #'agent-shell-set-session-mode
   "C-c C-v" #'agent-shell-set-session-model
   "C-c C-o" #'agent-shell-other-buffer
+  "C-c C-s" #'agent-shell-set-session-config-option
   "<remap> <yank>" #'agent-shell-yank-dwim)
 
 (shell-maker-define-major-mode (agent-shell--make-shell-maker-config) agent-shell-mode-map)
