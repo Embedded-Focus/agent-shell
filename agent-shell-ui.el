@@ -471,12 +471,12 @@ NAVIGATION controls navigability:
             (setq indicator-end (point))
             (add-text-properties indicator-start indicator-end
                                  `(agent-shell-ui-section indicator
-                                                          keymap ,(agent-shell-ui-make-action-keymap
-                                                                   (lambda ()
-                                                                     (interactive)
-                                                                     (agent-shell-ui-toggle-fragment-at-point)))
-                                                          read-only t
-                                                          front-sticky (read-only))))
+                                   keymap ,(agent-shell-ui-make-action-keymap
+                                            (lambda ()
+                                              (interactive)
+                                              (agent-shell-ui-toggle-fragment-at-point)))
+                                   read-only t
+                                   front-sticky (read-only))))
         (setq collapsable nil)
         (setq indicator-start (point))
         ;; Reserving the space for expand indicators enables
@@ -505,9 +505,9 @@ NAVIGATION controls navigability:
       (setq label-left-end (point))
       (add-text-properties label-left-start label-left-end
                            `(agent-shell-ui-section label-left
-                                                    help-echo ,qualified-id
-                                                    read-only t
-                                                    front-sticky (read-only)))
+                             help-echo ,qualified-id
+                             read-only t
+                             front-sticky (read-only)))
       (setq need-space t))
 
     (when label-right
@@ -524,9 +524,9 @@ NAVIGATION controls navigability:
       (setq label-right-end (point))
       (add-text-properties label-right-start label-right-end
                            `(agent-shell-ui-section label-right
-                                                    help-echo ,qualified-id
-                                                    read-only t
-                                                    front-sticky (read-only))))
+                             help-echo ,qualified-id
+                             read-only t
+                             front-sticky (read-only))))
 
     (when body
       (when (or label-left label-right)
@@ -544,9 +544,9 @@ NAVIGATION controls navigability:
       (setq body-end (point))
       (add-text-properties body-start body-end
                            `(agent-shell-ui-section body
-                                                    help-echo ,qualified-id
-                                                    read-only t
-                                                    front-sticky (read-only))))
+                             help-echo ,qualified-id
+                             read-only t
+                             front-sticky (read-only))))
     ;; Include the newlines before the body in the invisible region
     (when collapsable
       (add-text-properties (or label-right-end label-left-end)
@@ -589,8 +589,8 @@ When NO-UNDO is non-nil, disable undo recording."
            (buffer-undo-list (if no-undo t buffer-undo-list))
            (qualified-id (format "%s-%s" namespace-id block-id))
            (props `(agent-shell-ui-state ((:qualified-id . ,qualified-id))
-                                         read-only t
-                                         front-sticky (read-only)))
+                    read-only t
+                    front-sticky (read-only)))
            (match (save-mark-and-excursion
                     (goto-char (point-max))
                     (text-property-search-backward
@@ -719,7 +719,7 @@ When NO-UNDO is non-nil, disable undo recording."
 
 (defvar-local agent-shell-ui--fold-cycle-state nil
   "Current global fold cycle state for the buffer.
-One of `expanded', `collapsed', or nil (first call — derive from buffer).
+One of `expanded', `collapsed', or nil (first call - derive from buffer).
 Used by `agent-shell-ui-cycle-all-fragments' to alternate.")
 
 (defun agent-shell-ui--enclosing-fragment-position ()
@@ -757,7 +757,7 @@ to the next fragment forward and toggle it.
 
 After toggling, point returns to its starting position when the action
 target was the enclosing fragment; otherwise point moves to the toggled
-fragment.  Silent no-op when no fragment exists at or after point —
+fragment.  Silent no-op when no fragment exists at or after point -
 matches `agent-shell-ui-toggle-fragment-at-point' convention."
   (interactive)
   (when-let* ((origin (point))
@@ -780,6 +780,8 @@ Used by `agent-shell-ui-cycle-all-fragments' on its first invocation
 when the cycle state hasn't been established yet."
   (save-mark-and-excursion
     (goto-char (point-min))
+    ;; Dedup: text-property-search may visit the same qualified-id
+    ;; multiple times within a single block's propertied region.
     (let ((collapsed 0)
           (expanded 0)
           (seen-ids nil)
@@ -808,11 +810,11 @@ current global state is `expanded', all fragments are collapsed and
 state flips to `collapsed'.  Next invocation expands them all again.
 
 On first invocation (state nil), examines the buffer to derive the
-current majority state, then flips it — so the command \"does what you
+current majority state, then flips it - so the command \"does what you
 see,\" regardless of any manual folds in place.
 
 Fragments whose `:navigatable' flag is nil (e.g. inline message chunks)
-are skipped — they have no fold indicator to act on."
+are skipped - they have no fold indicator to act on."
   (interactive)
   (let* ((target-collapsed
           (pcase agent-shell-ui--fold-cycle-state
@@ -820,6 +822,8 @@ are skipped — they have no fold indicator to act on."
             ('collapsed nil)
             (_ (not (agent-shell-ui--majority-collapsed-p)))))
          (origin (point))
+         ;; Dedup: text-property-search may visit the same qualified-id
+         ;; multiple times within a single block's propertied region.
          (seen-ids nil))
     (save-mark-and-excursion
       (goto-char (point-min))
