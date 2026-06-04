@@ -3547,7 +3547,27 @@ When provided, included in help-echo tooltips."
   (unless state
     (error "STATE is required"))
   (let* ((header-model (agent-shell--make-header-model state :position position :status status :bindings bindings))
-         (text-header (format " %s%s%s%s @ %s%s%s%s%s%s"
+         (help-binding (seq-find (lambda (b)
+                                   (equal (map-elt b :description) "Help"))
+                                 (map-elt header-model :bindings)))
+         (help-chunk (when help-binding
+                       (concat (propertize (map-elt help-binding :key)
+                                           'face 'help-key-binding)
+                               " "
+                               (map-elt help-binding :description))))
+         (text-header (format " %s%s%s%s%s ➤ %s%s%s%s%s"
+                              (cond
+                               ((and (map-elt header-model :position)
+                                     (map-elt header-model :status))
+                                (concat (map-elt header-model :position) " "
+                                        (map-elt header-model :status)
+                                        (when help-chunk (concat " " help-chunk))
+                                        " ➤ "))
+                               ((map-elt header-model :position)
+                                (concat (map-elt header-model :position)
+                                        (when help-chunk (concat " " help-chunk))
+                                        " ➤ "))
+                               (t ""))
                               (propertize (map-elt header-model :buffer-name)
                                           'font-lock-face 'font-lock-variable-name-face)
                               (if (map-elt header-model :model-name)
@@ -3586,9 +3606,6 @@ When provided, included in help-echo tooltips."
                                                                                      (agent-shell--mode-line-mode-menu))
                                                                          map)))
                                 "")
-                              (if (map-elt header-model :position)
-                                  (concat (map-elt header-model :position) " ➤ ")
-                                "")
                               (propertize (map-elt header-model :project-name) 'font-lock-face 'font-lock-string-face)
                               (if (map-elt header-model :session-id)
                                   (concat " ➤ " (map-elt header-model :session-id))
@@ -3599,7 +3616,8 @@ When provided, included in help-echo tooltips."
                                             " ")
                                           (map-elt header-model :context-indicator))
                                 "")
-                              (if (map-elt header-model :status)
+                              (if (and (map-elt header-model :status)
+                                       (not (map-elt header-model :position)))
                                   (concat " ➤ " (map-elt header-model :status))
                                 "")
                               (if (map-elt header-model :busy-indicator-frame)
