@@ -212,9 +212,11 @@ Returns an alist with insertion details or nil otherwise:
         (viewport-buffer (current-buffer))
         (prompt (buffer-string)))
     (with-current-buffer shell-buffer
-      (agent-shell--insert-to-shell-buffer
-       :text prompt
-       :submit t))
+      (if (agent-shell-viewport--busy-p)
+          (agent-shell-queue-request prompt)
+        (agent-shell--insert-to-shell-buffer
+         :text prompt
+         :submit t)))
     (kill-buffer viewport-buffer)
     (pop-to-buffer shell-buffer)))
 
@@ -228,19 +230,15 @@ Returns an alist with insertion details or nil otherwise:
     (let ((shell-buffer (agent-shell-viewport--shell-buffer))
           (viewport-buffer (current-buffer))
           (prompt (string-trim (buffer-string))))
-      (when (agent-shell-viewport--busy-p)
-        (unless (agent-shell-interrupt-confirmed-p)
-          (throw 'exit nil))
-        (with-current-buffer shell-buffer
-          (agent-shell-interrupt t))
-        (with-current-buffer viewport-buffer
-          (agent-shell-viewport-view-mode)
-          (agent-shell-viewport--initialize
-           :prompt prompt))
-        (user-error "Aborted"))
       (when (string-empty-p (string-trim prompt))
         (agent-shell-viewport--initialize)
         (user-error "Nothing to send"))
+      (when (agent-shell-viewport--busy-p)
+        (with-current-buffer shell-buffer
+          (agent-shell-queue-request prompt))
+        (with-current-buffer viewport-buffer
+          (agent-shell-viewport-view-last))
+        (throw 'exit nil))
       (if (derived-mode-p 'agent-shell-viewport-view-mode)
           (progn
             (agent-shell-viewport-edit-mode)
@@ -675,8 +673,6 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   (interactive)
   (unless (derived-mode-p 'agent-shell-viewport-view-mode)
     (user-error "Not in a shell viewport buffer"))
-  (when (agent-shell-viewport--busy-p)
-    (user-error "Busy, please wait"))
   (let ((region (map-elt (agent-shell--get-region :deactivate t) :content)))
     (agent-shell-viewport--setup-reply
      :quoted-text (when region (string-trim region))))
@@ -699,6 +695,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"yes\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "yes")
   (agent-shell-viewport-compose-send))
@@ -707,6 +705,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"1\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "1")
   (agent-shell-viewport-compose-send))
@@ -715,6 +715,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"2\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "2")
   (agent-shell-viewport-compose-send))
@@ -723,6 +725,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"3\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "3")
   (agent-shell-viewport-compose-send))
@@ -731,6 +735,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"4\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "4")
   (agent-shell-viewport-compose-send))
@@ -739,6 +745,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"5\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "5")
   (agent-shell-viewport-compose-send))
@@ -747,6 +755,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"6\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "6")
   (agent-shell-viewport-compose-send))
@@ -755,6 +765,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"7\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "7")
   (agent-shell-viewport-compose-send))
@@ -763,6 +775,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"8\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "8")
   (agent-shell-viewport-compose-send))
@@ -771,6 +785,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"9\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "9")
   (agent-shell-viewport-compose-send))
@@ -779,6 +795,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"more\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "more")
   (agent-shell-viewport-compose-send))
@@ -787,6 +805,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"again\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "again")
   (agent-shell-viewport-compose-send))
@@ -795,6 +815,8 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
   "Reply with \"continue\" and send immediately."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
+  (when (agent-shell-viewport--busy-p)
+    (user-error "Busy, please wait"))
   (agent-shell-viewport-reply)
   (insert "continue")
   (agent-shell-viewport-compose-send))
@@ -1110,9 +1132,10 @@ VIEWPORT-BUFFER is the viewport buffer to check."
               (apply #'vector ""
                      (agent-shell-viewport--make-transient-group
                       agent-shell-viewport-view-mode-map
-                      '(((:function . agent-shell-viewport-reply)
-                         (:description . "Reply…")
-                         (:if-not . agent-shell-viewport--busy-p))
+                      `(((:function . agent-shell-viewport-reply)
+                         (:description . ,(if (agent-shell-viewport--busy-p)
+                                              "Queue reply…"
+                                            "Reply…")))
                         ((:function . agent-shell-viewport-quote-reply)
                          (:description . "Quote reply…")
                          (:if-not . agent-shell-viewport--busy-p))
@@ -1250,6 +1273,9 @@ major mode."
                   (list (cons :current 1) (cons :total 1))))
          (position-label (format "%d/%d" (map-elt pos :current) (map-elt pos :total)))
          (status (cond
+                  ((and (agent-shell-viewport--busy-p)
+                        (derived-mode-p 'agent-shell-viewport-edit-mode))
+                   (propertize "Edit (queue)" 'face 'success))
                   ((agent-shell-viewport--busy-p) (propertize "Busy" 'face 'warning))
                   ((derived-mode-p 'agent-shell-viewport-edit-mode)
                    (propertize "Edit" 'face 'success))
@@ -1285,12 +1311,13 @@ major mode."
                                                     'agent-shell-viewport-previous-item
                                                     agent-shell-viewport-view-mode-map t)))
                          (:description . "Previous")))
-                      (unless (agent-shell-viewport--busy-p)
-                        (list
-                         `((:key . ,(key-description (where-is-internal
-                                                      'agent-shell-viewport-reply
-                                                      agent-shell-viewport-view-mode-map t)))
-                           (:description . "Reply…"))))
+                      (list
+                       `((:key . ,(key-description (where-is-internal
+                                                    'agent-shell-viewport-reply
+                                                    agent-shell-viewport-view-mode-map t)))
+                         (:description . ,(if (agent-shell-viewport--busy-p)
+                                              "Queue reply…"
+                                            "Reply…"))))
                       (when (agent-shell-viewport--busy-p)
                         (list
                          `((:key . ,(key-description (where-is-internal
