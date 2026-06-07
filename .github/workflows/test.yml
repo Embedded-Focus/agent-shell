@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  checks: write
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: '29.1'
+
+      - name: Clone dependencies
+        run: |
+          git clone --depth 1 https://github.com/xenodium/acp.el ../acp
+          git clone --depth 1 https://github.com/xenodium/shell-maker ../shell-maker
+          git clone --depth 1 https://bitbucket.org/olanilsson/ert-junit ../ert-junit
+
+      - name: Run tests
+        run: |
+          emacs --batch -Q \
+            -L . \
+            -L ../acp \
+            -L ../shell-maker \
+            -L ../ert-junit \
+            --load ert-junit \
+            --load tests/agent-shell-fakes.el \
+            $(find tests -name '*-tests.el' | sort | sed 's/^/--load /') \
+            -f ert-junit-run-tests-batch-and-exit \
+            test-results.xml
+
+      - name: Report test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: ERT Tests
+          path: test-results.xml
+          reporter: java-junit
