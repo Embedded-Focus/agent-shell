@@ -766,9 +766,10 @@ If point is on a fragment, toggle that fragment.  If point is inside a
 fragment's block range, toggle the enclosing fragment.  Otherwise jump
 to the next fragment forward and toggle it.
 
-After toggling, point returns to its starting position when the action
-target was the enclosing fragment; otherwise point moves to the toggled
-fragment.  Silent no-op when no fragment exists at or after point."
+After toggling, point returns to its starting position, except when the
+action collapsed the fragment from inside the body — that position is
+now invisible, so point moves to the start of the title line instead.
+Silent no-op when no fragment exists at or after point."
   (interactive)
   (when-let* ((origin (point))
               (target (agent-shell-ui--enclosing-fragment-position)))
@@ -780,9 +781,12 @@ fragment.  Silent no-op when no fragment exists at or after point."
       (goto-char target)
       (agent-shell-ui--toggle-fragment-at-point)
       (when origin-was-inside
-        (when-let* ((block (agent-shell-ui--block-range :position target))
-                    (max-pos (map-elt block :end)))
-          (goto-char (min origin max-pos)))))))
+        (when-let* ((block (agent-shell-ui--block-range :position target)))
+          (if (get-text-property origin 'invisible)
+              ;; The prior position is now invisible — land at the start
+              ;; of the title line instead.
+              (goto-char (map-elt block :start))
+            (goto-char (min origin (map-elt block :end)))))))))
 
 (defun agent-shell-ui--majority-collapsed-p ()
   "Return non-nil when most navigatable fragments in the buffer are collapsed.
