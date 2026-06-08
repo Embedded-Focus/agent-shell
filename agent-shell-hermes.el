@@ -100,17 +100,22 @@ Customize \\\\[customize-variable] `agent-shell-hermes-acp-command' for remote s
             message)))
 
 (defun agent-shell-hermes--ascii-art ()
-  "Hermes ASCII art (banner font)."
+  "Hermes ASCII art (pyfiglet ansi_shadow font)."
   (let* ((is-dark (eq (frame-parameter nil 'background-mode) 'dark))
-         ;; pyfiglet banner font, width=60, HERMES in # characters
          (text (string-trim "
-#     # ####### ######  #     # #######  #####
-#     # #       #     # ##   ## #       #     #
-#     # #       #     # # # # # #       #
-####### #####   ######  #  #  # #####    #####
-#     # #       #   #   #     # #             #
-#     # #       #    #  #     # #       #     #
-#     # ####### #     # #     # #######  ##### " "\n")))
+██╗  ██╗ ███████╗ ██████╗  ███╗   ███╗ ███████╗ ███████╗
+██║  ██║ ██╔════╝ ██╔══██╗ ████╗ ████║ ██╔════╝ ██╔════╝
+███████║ █████╗   ██████╔╝ ██╔████╔██║ █████╗   ███████╗
+██╔══██║ ██╔══╝   ██╔══██╗ ██║╚██╔╝██║ ██╔══╝   ╚════██║
+██║  ██║ ███████╗ ██║  ██║ ██║ ╚═╝ ██║ ███████╗ ███████║
+╚═╝  ╚═╝ ╚══════╝ ╚═╝  ╚═╝ ╚═╝     ╚═╝ ╚══════╝ ╚══════╝
+ █████╗   ██████╗  ███████╗ ███╗   ██╗ ████████╗
+██╔══██╗ ██╔════╝  ██╔════╝ ████╗  ██║ ╚══██╔══╝
+███████║ ██║  ███╗ █████╗   ██╔██╗ ██║    ██║
+██╔══██║ ██║   ██║ ██╔══╝   ██║╚██╗██║    ██║
+██║  ██║ ╚██████╔╝ ███████╗ ██║ ╚████║    ██║
+╚═╝  ╚═╝  ╚═════╝  ╚══════╝ ╚═╝  ╚═══╝    ╚═╝
+" "\n")))
     (propertize text 'font-lock-face (if is-dark
                                          '(:foreground "#e0a050" :inherit fixed-pitch)
                                        '(:foreground "#b07830" :inherit fixed-pitch)))))
