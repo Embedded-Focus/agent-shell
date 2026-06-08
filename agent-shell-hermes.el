@@ -57,16 +57,17 @@ starting the Hermes agent process."
   :type '(repeat string)
   :group 'agent-shell)
 
-(defcustom agent-shell-hermes-default-session-mode-id "accept_edits"
+(defcustom agent-shell-hermes-default-session-mode-id nil
   "Default ACP session mode for the Hermes agent.
 
 Controls edit approval behavior (file patch/write permission prompts).
 
 Possible values are one of:
 
-\\='default'       Ask every time for any file edit.
+nil               Don't set a mode; let Hermes use its own default.
+                  (Default.)
 \\='accept_edits'  Auto-approve workspace and /tmp edits; prompt only for
-                  sensitive paths like .git/.ssh/.env. (Default.)
+                  sensitive paths like .git/.ssh/.env.
 \\='dont_ask'      Auto-approve all non-sensitive edits for the entire session."
   :type '(choice (const :tag "Ask every time" nil)
                  (const :tag "Accept edits (workspace+tmp)" "accept_edits")
