@@ -1630,6 +1630,23 @@ COMMAND, when present, may be a shell command string or an argv vector."
   "Return non-nil if STATE has in-flight requests awaiting responses."
   (map-elt state :active-requests))
 
+(defun agent-shell--format-tool-call-input (raw-input)
+  "Format RAW-INPUT from a tool call as a fenced code block.
+
+RAW-INPUT is the alist parsed from an ACP tool call's `rawInput' field.
+If it has exactly one key whose value is a non-empty string, that value
+is rendered inside a bare fence.  Otherwise RAW-INPUT is rendered as
+pretty-printed JSON inside a json fence."
+  (if-let* (((= (length raw-input) 1))
+            (value (cdar raw-input))
+            ((and (stringp value) (not (string-empty-p value)))))
+      (format "```\n%s\n```" value)
+    (format "```json\n%s\n```"
+            (with-temp-buffer
+              (insert (json-encode raw-input))
+              (json-pretty-print-buffer)
+              (buffer-string)))))
+
 (cl-defun agent-shell--on-notification (&key state acp-notification)
   "Handle incoming ACP-NOTIFICATION using STATE."
   (map-put! state :last-activity-time (current-time))
@@ -1909,20 +1926,37 @@ COMMAND, when present, may be a shell command string or an argv vector."
                  ;; agent-shell--update-fragment param by "session/request_permission".
                  (agent-shell--delete-fragment :state state :block-id (format "permission-%s" (map-nested-elt acp-notification '(params update toolCallId)))))
                (let* ((tool-call-labels (agent-shell-make-tool-call-label state (map-nested-elt acp-notification '(params update toolCallId))))
-                      (saved-command (map-nested-elt state `(:tool-calls
-                                                             ,(map-nested-elt acp-notification '(params update toolCallId))
-                                                             :command)))
-                      ;; Prepend fenced command to body.
+                      (tool-call-id (map-nested-elt acp-notification '(params update toolCallId)))
+                      (saved-command (map-nested-elt state `(:tool-calls ,tool-call-id :command)))
+                      ;; Prepend fenced command to body for Bash-like
+                      ;; tools.
                       (command-block (when saved-command
-                                       (concat "```console\n" saved-command "\n```"))))
+                                       (concat "```console\n" saved-command "\n```")))
+                      ;; For tools without a `command' parameter such
+                      ;; as MCP tools, render the input parameters
+                      ;; above the body so the user can inspect
+                      ;; them. Standard tool kinds like "read" have
+                      ;; their parameters baked into the title, so we
+                      ;; only render parameters non-standard tools
+                      ;; like MCP calls.
+                      (tool-call-kind (map-nested-elt state `(:tool-calls ,tool-call-id :kind)))
+                      (saved-input (map-nested-elt state `(:tool-calls ,tool-call-id :raw-input)))
+                      (input-block (when (and (member tool-call-kind '(nil "other"))
+                                              saved-input
+                                              (not saved-command))
+                                     (agent-shell--format-tool-call-input saved-input))))
                  (agent-shell--update-fragment
                   :state state
                   :block-id (map-nested-elt acp-notification '(params update toolCallId))
                   :label-left (map-elt tool-call-labels :status)
                   :label-right (map-elt tool-call-labels :title)
-                  :body (if command-block
-                            (concat command-block "\n\n" (string-trim body-text))
-                          (string-trim body-text))
+                  :body (cond
+                         (command-block
+                          (concat command-block "\n\n" (string-trim body-text)))
+                         (input-block
+                          (concat input-block "\n\n" (string-trim body-text)))
+                         (t
+                          (string-trim body-text)))
                   :expanded agent-shell-tool-use-expand-by-default)))
              (map-put! state :last-entry-type "tool_call_update")))
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "available_commands_update")
