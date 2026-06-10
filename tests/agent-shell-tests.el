@@ -2828,6 +2828,10 @@ Gemini sends these fields as empty arrays."
 After `kill-buffer' happens during restart, Emacs falls back to another
 buffer.  Without the fix, `default-directory' would be inherited from
 that fallback buffer, potentially starting the new shell in the wrong project."
+  ;; Requires `make-frame', which signals \"Unknown terminal type\" in
+  ;; `--batch'.  Skip when no display is available so CI doesn't fail
+  ;; on environments that can't host a frame.
+  (skip-unless (display-graphic-p))
   (let ((shell-buffer nil)
         (other-buffer nil)
         (captured-dir nil)
