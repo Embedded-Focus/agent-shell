@@ -1724,15 +1724,23 @@ code block content
     (let* ((agent-shell-session-strategy 'latest)
            (requests '())
            (session-init-called nil)
-           (state `((:buffer . ,(current-buffer))
-                    (:client . test-client)
-                    (:session . ((:id . nil)
-                                 (:mode-id . nil)
-                                 (:modes . nil)))
-                    (:supports-session-list . t)
-                    (:supports-session-load . t)
-                    (:active-requests)
-                    (:event-subscriptions . nil))))
+           ;; Build the state with `list'/`cons' (not backquote) so the
+           ;; alist cells are fresh and `map-put!' can mutate in place.
+           ;; Literal cells from a backquoted template signal
+           ;; `map-not-inplace' on the first put.  `:pending-restore'
+           ;; must be present (initialized to nil) because
+           ;; `agent-shell--initiate-session-list-and-load' calls
+           ;; `map-put!' on it after a successful list response.
+           (state (list (cons :buffer (current-buffer))
+                        (cons :client 'test-client)
+                        (cons :session (list (cons :id nil)
+                                             (cons :mode-id nil)
+                                             (cons :modes nil)))
+                        (cons :supports-session-list t)
+                        (cons :supports-session-load t)
+                        (cons :pending-restore nil)
+                        (cons :active-requests nil)
+                        (cons :event-subscriptions nil))))
       (setq-local agent-shell--state state)
       (cl-letf (((symbol-function 'agent-shell--state)
                  (lambda () agent-shell--state))
