@@ -425,11 +425,12 @@
 (ert-deftest agent-shell--get-numbered-region-test ()
   "Test `agent-shell--get-numbered-region' preserves selection and respects TRIM."
   (with-temp-buffer
-    ;; Lines: 1="", 2="foo", 3="", 4="bar", 5="" (trailing newline).
+    ;; Lines: 1="", 2="foo", 3="", 4="bar", 5="" (including trailing newline).
     (insert "
 foo
 
 bar
+
 ")
     ;; Without TRIM: empty boundary lines (1 and 5) are preserved.
     (should (equal (agent-shell--get-numbered-region
@@ -449,7 +450,25 @@ bar
                     :trim t)
                    "   2: foo
    3: 
-   4: bar"))))
+   4: bar")))
+  (with-temp-buffer
+    (insert "foo
+bar
+baz
+")
+    (let (from to)
+      (goto-char (point-min))
+      (forward-line 1)
+      (setq from (point))
+      (forward-line 1)
+      (setq to (point))
+      ;; When selecting whole lines including trailing newline, adjust
+      ;; region-end
+      (should (equal (agent-shell--get-numbered-region
+                    :buffer (current-buffer)
+                    :from from
+                    :to to)
+                   "   2: bar")))))
 
 (ert-deftest agent-shell--expand-truncated-regions-test ()
   "Test `agent-shell--expand-truncated-regions' substitutes marked spans for their full text."

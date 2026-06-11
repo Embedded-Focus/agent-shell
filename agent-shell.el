@@ -7143,8 +7143,7 @@ Uses AGENT-CWD to shorten file paths where necessary."
                                       (let ((char-start (map-elt region :char-start))
                                             (char-end (map-elt region :char-end))
                                             (max-preview-lines 5))
-                                        (if (equal (line-number-at-pos char-start)
-                                                   (line-number-at-pos char-end))
+                                        (if (= (count-lines char-start char-end) 1)
                                             ;; Same line region? Avoid numbering.
                                             (buffer-substring char-start char-end)
                                           (agent-shell--get-numbered-region
@@ -7170,7 +7169,11 @@ If CAP is non-nil, truncate at CAP."
     (save-excursion
       (goto-char from)
       (let* ((start-line (line-number-at-pos from))
-             (end-line (line-number-at-pos to))
+             (end-line (save-excursion
+                         (goto-char to)
+                         (when (and (bolp) (not (bobp)))
+                           (backward-char))
+                         (line-number-at-pos)))
              (lines '())
              (current-line start-line))
         (goto-char (point-min))
@@ -7394,8 +7397,12 @@ Available values:
         (:language . ,language)
         (:char-start . ,start)
         (:char-end . ,end)
-        (:line-start . ,(save-excursion (goto-char start) (line-number-at-pos)))
-        (:line-end . ,(save-excursion (goto-char end) (line-number-at-pos)))
+        (:line-start . ,(line-number-at-pos start))
+        (:line-end . ,(save-excursion
+                        (goto-char end)
+                        (when (and (bolp) (not (bobp)))
+                          (backward-char))
+                        (line-number-at-pos)))
         (:content . ,content)))))
 
 (cl-defun agent-shell--align-alist (&key data columns (separator "  ") joiner)
