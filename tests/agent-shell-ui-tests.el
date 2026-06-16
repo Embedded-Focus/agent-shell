@@ -264,6 +264,65 @@ but `:qualified-id` is stable.  Toggle resolves the target via
           (should (agent-shell-ui-tests--fragment-collapsed-p "ns" "1")))
       (kill-buffer buf))))
 
+;;; backward-block
+
+(defun agent-shell-ui-tests--fragment-start (qualified-id)
+  "Return the start position of fragment QUALIFIED-ID, or nil."
+  (save-mark-and-excursion
+    (goto-char (point-min))
+    (when-let* ((match (text-property-search-forward
+                        'agent-shell-ui-state nil
+                        (lambda (_ state)
+                          (equal (map-elt state :qualified-id) qualified-id))
+                        t)))
+      (prop-match-beginning match))))
+
+(ert-deftest agent-shell-ui-backward-block-from-inside-goes-to-own-start-test ()
+  "`agent-shell-ui-backward-block' from inside a block goes to its own start.
+
+From the block's start it then jumps to the previous block."
+  (let ((buf (agent-shell-ui-tests--make-buffer-with-fragments
+              '(((:namespace-id . "ns") (:block-id . "1")
+                 (:label-left . "First") (:body . "body one") (:expanded . t))
+                ((:namespace-id . "ns") (:block-id . "2")
+                 (:label-left . "Second") (:body . "body two") (:expanded . t))))))
+    (unwind-protect
+        (with-current-buffer buf
+          (let ((first-start (agent-shell-ui-tests--fragment-start "ns-1"))
+                (second-start (agent-shell-ui-tests--fragment-start "ns-2")))
+            ;; Strictly inside the second block -> its own start.
+            (goto-char (+ second-start 3))
+            (should (equal (agent-shell-ui-backward-block) second-start))
+            ;; At the second block's start -> the previous block.
+            (goto-char second-start)
+            (should (equal (agent-shell-ui-backward-block) first-start))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-shell-ui-backward-block-skips-non-navigatable-block-test ()
+  "`agent-shell-ui-backward-block' skips non-navigatable blocks.
+
+From inside a non-navigatable block it lands on the previous
+navigatable block, not on the non-navigatable block's own start."
+  (let ((buf (generate-new-buffer " *test-ui-fragments*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (agent-shell-ui-mode 1)
+          (agent-shell-ui-update-fragment
+           (agent-shell-ui-make-fragment-model
+            :namespace-id "ns" :block-id "1"
+            :label-left "First" :body "body one")
+           :expanded t :navigation 'always)
+          (agent-shell-ui-update-fragment
+           (agent-shell-ui-make-fragment-model
+            :namespace-id "ns" :block-id "2"
+            :label-left "Second" :body "body two")
+           :expanded t :navigation 'never)
+          (let ((first-start (agent-shell-ui-tests--fragment-start "ns-1"))
+                (non-nav-start (agent-shell-ui-tests--fragment-start "ns-2")))
+            (goto-char (+ non-nav-start 3))
+            (should (equal (agent-shell-ui-backward-block) first-start))))
+      (kill-buffer buf))))
+
 ;;; provide
 
 (provide 'agent-shell-ui-tests)

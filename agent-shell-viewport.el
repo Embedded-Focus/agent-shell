@@ -828,11 +828,20 @@ buffer from the snapshot and switch to edit mode."
           (cl-return-from agent-shell-viewport-next-page))
       (when-let* ((next (with-current-buffer shell-buffer
                           (if backwards
-                              (when (save-excursion
-                                      (let ((orig-line (line-number-at-pos)))
-                                        (comint-previous-prompt 1)
-                                        (= orig-line (line-number-at-pos))))
-                                (error "No previous page"))
+                              (progn
+                                ;; Navigate relative to the interaction
+                                ;; containing point, not wherever point happens
+                                ;; to sit within it.  Without this, switching to
+                                ;; the viewport with point mid-interaction makes
+                                ;; the first backward step land on the current
+                                ;; interaction's prompt instead of the previous
+                                ;; interaction.
+                                (goto-char (shell-maker--prompt-begin-position))
+                                (when (save-excursion
+                                        (let ((orig-line (line-number-at-pos)))
+                                          (comint-previous-prompt 1)
+                                          (= orig-line (line-number-at-pos))))
+                                  (error "No previous page")))
                             (when (save-excursion
                                     (let ((orig-line (point)))
                                       (comint-next-prompt 1)
@@ -844,7 +853,6 @@ buffer from the snapshot and switch to edit mode."
         (goto-char (if start-at-top
                        (point-min)
                      (if backwards (point-max) (point-min))))
-        (agent-shell-viewport--update-header)
         next))))
 
 (defun agent-shell-viewport-set-session-model ()

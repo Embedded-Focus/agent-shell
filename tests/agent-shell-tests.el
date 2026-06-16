@@ -3101,5 +3101,83 @@ agent activity; consecutive user chunks stay in the same turn."
         (should session-init-called)
         (should-not (map-elt agent-shell--state :pending-restore))))))
 
+(ert-deftest agent-shell-viewport-next-page-navigates-from-current-prompt-begin-test ()
+  "Test `agent-shell-viewport-next-page' navigates from the current prompt.
+
+When the shell point sits mid-interaction (e.g. after switching to the
+viewport without repositioning), navigation must start from the current
+interaction's prompt begin, otherwise a backward step lands on the
+current interaction instead of the previous one."
+  (let ((shell-buffer (generate-new-buffer " *agent-shell shell*"))
+        (viewport-buffer (generate-new-buffer " *agent-shell shell* [viewport]"))
+        (navigated-from nil)
+        (prompt-begin nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer shell-buffer
+            (insert "line one\nprompt two line\nresponse line three\nmore content")
+            (goto-char (point-min))
+            (forward-line 1)
+            (setq prompt-begin (point))
+            ;; Point sits mid/after the interaction, not at the prompt begin.
+            (goto-char (point-max)))
+          (with-current-buffer viewport-buffer
+            (cl-letf (((symbol-function 'agent-shell-viewport--update-header)
+                       (lambda () nil)))
+              (agent-shell-viewport-view-mode)))
+          (with-current-buffer viewport-buffer
+            (cl-letf (((symbol-function 'agent-shell-viewport--busy-p)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'agent-shell-viewport--shell-buffer)
+                       (lambda (&rest _) shell-buffer))
+                      ((symbol-function 'agent-shell-viewport--position)
+                       (lambda (&rest _) '((:current . 2) (:total . 2))))
+                      ((symbol-function 'shell-maker--prompt-begin-position)
+                       (lambda () prompt-begin))
+                      ((symbol-function 'comint-previous-prompt)
+                       (lambda (&rest _) (forward-line -1)))
+                      ((symbol-function 'agent-shell--next-command-and-response)
+                       (lambda (_backwards)
+                         (setq navigated-from (point))
+                         '("prompt two" . "response")))
+                      ((symbol-function 'agent-shell-viewport--initialize)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'agent-shell-viewport--update-header)
+                       (lambda () nil)))
+              (agent-shell-viewport-next-page :backwards t)
+              (should (equal navigated-from prompt-begin)))))
+      (kill-buffer viewport-buffer)
+      (kill-buffer shell-buffer))))
+
+(ert-deftest agent-shell-viewport-initialize-rerenders-header-position-test ()
+  "Test `agent-shell-viewport--initialize' re-renders the header position.
+
+A stale cached position must not survive a content refresh, otherwise
+the header shows a position that doesn't match the displayed
+interaction (e.g. \"1/2\" after switching to the latest interaction)."
+  (let ((viewport-buffer (generate-new-buffer " *agent-shell shell* [viewport]"))
+        (shell-buffer (generate-new-buffer " *agent-shell shell*"))
+        (rendered-position nil))
+    (unwind-protect
+        (with-current-buffer viewport-buffer
+          (cl-letf (((symbol-function 'agent-shell-viewport--update-header)
+                     (lambda () nil)))
+            (agent-shell-viewport-view-mode))
+          ;; Seed a stale cached position.
+          (setq agent-shell-viewport--position-cache '((:current . 1) (:total . 2)))
+          (cl-letf (((symbol-function 'agent-shell-viewport--shell-buffer)
+                     (lambda (&rest _) shell-buffer))
+                    ((symbol-function 'shell-maker-history-position)
+                     (lambda () '((:current . 2) (:total . 2))))
+                    ((symbol-function 'markdown-overlays-put)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-shell-viewport--update-header)
+                     (lambda ()
+                       (setq rendered-position (agent-shell-viewport--position)))))
+            (agent-shell-viewport--initialize :prompt "p" :response "r")
+            (should (equal rendered-position '((:current . 2) (:total . 2))))))
+      (kill-buffer viewport-buffer)
+      (kill-buffer shell-buffer))))
+
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here
