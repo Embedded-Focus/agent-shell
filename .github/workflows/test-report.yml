@@ -32,3 +32,4 @@ jobs:
           name: ERT Tests
           path: test-results.xml
           reporter: java-junit
+          use-actions-summary: false
