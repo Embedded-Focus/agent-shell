@@ -57,7 +57,7 @@ Example usage:
 
   (setq agent-shell-omp-environment
         (agent-shell-make-environment-variables
-         \"ANTHROPIC_API_KEY\" \"your-key\"))"
+         \"<KEY>\" \"<VALUE>\"))"
   :type '(repeat string)
   :group 'agent-shell)
 
@@ -74,7 +74,7 @@ Returns an agent configuration alist using `agent-shell-make-agent-config'."
    :welcome-function #'agent-shell-omp--welcome-message
    :client-maker (lambda (buffer)
                    (agent-shell-omp-make-client :buffer buffer))
-   :install-instructions "Install omp (Oh My Pi) and ensure it is available on your PATH."))
+   :install-instructions "See https://github.com/can1357/oh-my-pi omp (Oh My Pi) installation."))
 
 (defun agent-shell-omp-start ()
   "Start an interactive Oh My Pi (omp) agent shell."
