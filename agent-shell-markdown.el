@@ -591,7 +591,9 @@ For example, the buffer \"see ![logo](logo.png)\" becomes
               (let ((image (create-image
                             path nil nil
                             :max-width (agent-shell-markdown--image-max-width)))
-                    (placeholder (if (string-empty-p alt) " " alt)))
+                    (placeholder (if (string-empty-p alt) " " alt))
+                    (line-prefix (get-text-property markup-start 'line-prefix))
+                    (wrap-prefix (get-text-property markup-start 'wrap-prefix)))
                 (image-flush image)
                 (delete-region markup-start markup-end)
                 (goto-char markup-start)
@@ -602,7 +604,11 @@ For example, the buffer \"see ![logo](logo.png)\" becomes
                                      (agent-shell-markdown--make-ret-binding-map
                                       (lambda () (interactive)
                                         (find-file path))))
-                  (put-text-property markup-start end 'mouse-face 'highlight)))))))))))
+                  (put-text-property markup-start end 'mouse-face 'highlight)
+                  (when line-prefix
+                    (put-text-property markup-start end 'line-prefix line-prefix))
+                  (when wrap-prefix
+                    (put-text-property markup-start end 'wrap-prefix wrap-prefix))))))))))))
 
 (cl-defun agent-shell-markdown--replace-image-file-paths (&key avoid-ranges)
   "Render bare image-path lines as displayed images.
