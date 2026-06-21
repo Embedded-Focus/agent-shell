@@ -122,7 +122,6 @@ npm install -g @blowmage/cursor-agent-acp
 
 See https://github.com/blowmage/cursor-agent-acp-npm for details.
 
-
 *** Kimi Code CLI
 
 For Kimi Code CLI, install with:
@@ -202,6 +201,15 @@ npm install -g pi-acp
 #+end_src
 
 See https://github.com/svkozak/pi-acp for details.
+*** Oh My Pi (=omp=)
+
+For the =omp= agent, install with:
+
+#+begin_src bash
+bun install -g @oh-my-pi/pi-coding-agent
+#+end_src
+
+See https://github.com/can1357/oh-my-pi for details.
 
 *** Opencode + local ollama models
 
