@@ -3441,5 +3441,39 @@ interaction (e.g. \"1/2\" after switching to the latest interaction)."
       (kill-buffer viewport-buffer)
       (kill-buffer shell-buffer))))
 
+(ert-deftest agent-shell--refresh-session-title-skips-when-list-unsupported ()
+  "Test `agent-shell--refresh-session-title' sends no request without `list'.
+
+Agents that don't advertise the `list' session capability (e.g. Cline)
+would otherwise get a `session/list' request on every turn, failing
+with \"Method not found\"."
+  (with-temp-buffer
+    (let ((request-sent nil)
+          (state (list (cons :client 'test-client)
+                       (cons :supports-session-list nil)
+                       (cons :session (list (cons :id "session-123"))))))
+      (setq-local agent-shell--state state)
+      (cl-letf (((symbol-function 'acp-send-request)
+                 (lambda (&rest _args)
+                   (setq request-sent t))))
+        (agent-shell--refresh-session-title)
+        (should-not request-sent)))))
+
+(ert-deftest agent-shell--refresh-session-title-fetches-when-list-supported ()
+  "Test `agent-shell--refresh-session-title' sends `session/list' when supported."
+  (with-temp-buffer
+    (let ((sent-method nil)
+          (state (list (cons :client 'test-client)
+                       (cons :supports-session-list t)
+                       (cons :session (list (cons :id "session-123"))))))
+      (setq-local agent-shell--state state)
+      (cl-letf (((symbol-function 'agent-shell--resolve-path)
+                 (lambda (path) path))
+                ((symbol-function 'acp-send-request)
+                 (lambda (&rest args)
+                   (setq sent-method (map-elt (plist-get args :request) :method)))))
+        (agent-shell--refresh-session-title)
+        (should (equal sent-method "session/list"))))))
+
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here
