@@ -44,6 +44,26 @@ The first element is the command name, and the rest are command parameters."
   :type '(repeat string)
   :group 'agent-shell)
 
+(defcustom agent-shell-cline-default-model-id
+  nil
+  "Default Cline model ID.
+
+Must be one of the model ID's displayed under \"Available models\"
+when starting a new shell.
+
+Can be set to either a string or a function that returns a string."
+  :type '(choice (const nil) string function)
+  :group 'agent-shell)
+
+(defcustom agent-shell-cline-default-session-mode-id
+  nil
+  "Default Cline session mode ID.
+
+Must be one of the mode ID's displayed under \"Available modes\"
+when starting a new shell."
+  :type '(choice (const nil) string)
+  :group 'agent-shell)
+
 (defcustom agent-shell-cline-environment
   nil
   "Environment variables for the Cline agent client.
@@ -67,6 +87,10 @@ Returns an agent configuration alist using `agent-shell-make-agent-config'."
    :welcome-function #'agent-shell-cline--welcome-message
    :client-maker (lambda (buffer)
                    (agent-shell-cline-make-client :buffer buffer))
+   :default-model-id (lambda () (if (functionp agent-shell-cline-default-model-id)
+                                    (funcall agent-shell-cline-default-model-id)
+                                  agent-shell-cline-default-model-id))
+   :default-session-mode-id (lambda () agent-shell-cline-default-session-mode-id)
    :install-instructions "See https://cline.bot/cli for installation."))
 
 (defun agent-shell-cline-start-agent ()
