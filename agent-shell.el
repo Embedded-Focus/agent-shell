@@ -8292,6 +8292,20 @@ commands when the agent has reported them."
       (agent-shell--enqueue-request :prompt prompt)
     (agent-shell--insert-to-shell-buffer :text prompt :submit t :no-focus t)))
 
+(defun agent-shell-narrow-to-block (count)
+  "Narrow to the last COUNT navigatable blocks in the current buffer.
+The buffer must be an `agent-shell-mode' buffer.  Narrow from the
+start of the COUNTth-from-last navigatable block to `point-max'."
+  (interactive "P")
+  (unless (derived-mode-p 'agent-shell-mode)
+    (error "Not in an agent-shell buffer."))
+  (save-excursion
+    (widen)
+    (goto-char (point-max))
+    (dotimes (_ (or count 1)) (agent-shell-ui-backward-block))
+    (when-let* ((block (agent-shell-ui--block-range :position (point))))
+      (narrow-to-region (map-elt block :start) (point-max)))))
+
 (defun agent-shell-quote-region ()
   "Quote the active region into the shell's latest prompt.
 
