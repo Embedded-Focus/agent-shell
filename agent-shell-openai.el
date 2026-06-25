@@ -153,7 +153,7 @@ Returns an agent configuration alist using `agent-shell-make-agent-config'."
                                         (acp-make-authenticate-request :method-id "chatgpt"))))
    :client-maker (lambda (buffer)
                    (agent-shell-openai-make-codex-client :buffer buffer))
-   :install-instructions "See https://github.com/agentclientprotocol/codex-acp for installation."))
+   :install-instructions "See https://github.com/zed-industries/codex-acp for installation."))
 
 (defun agent-shell-openai-start-codex ()
   "Start an interactive Codex agent shell."
