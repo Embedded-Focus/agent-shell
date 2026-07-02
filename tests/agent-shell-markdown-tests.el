@@ -1530,6 +1530,33 @@ exercised by the editing in the -all-math-cases test.)"
                        ("bold" (agent-shell-markdown-bold))
                        (" and $$a_b*c*$$ end" nil)))))))
 
+(ert-deftest agent-shell-markdown-render-functions-frozen-fenced-block-left-intact ()
+  ;; A render function can claim a ```math / ```latex fence in place
+  ;; (freezing the whole block without deleting its fences), and
+  ;; `--style-source-blocks' honors `agent-shell-markdown-frozen' and
+  ;; leaves it untouched.  Without this the source-block pass would strip
+  ;; the fences and re-fontify the body as a code panel, clobbering the
+  ;; renderer's overlay and forcing it to mutate the agent's original text.
+  (with-temp-buffer
+    (let ((agent-shell-markdown-render-functions
+           (list (lambda (context)
+                   (dolist (block (map-elt context :source-blocks))
+                     (when (and (equal (map-elt block :language) "math")
+                                (map-elt block :complete))
+                       (put-text-property (map-nested-elt block '(:block :start))
+                                          (map-nested-elt block '(:block :end))
+                                          'agent-shell-markdown-frozen t)))
+                   nil))))
+      (insert "```math\n\\frac{a}{b}\n```\n")
+      (agent-shell-markdown-replace-markup)
+      ;; Fences and body survive verbatim: no code-panel "⧉" label was
+      ;; inserted and the frozen claim still stands for later passes.
+      (should (equal (substring-no-properties (buffer-string))
+                     "```math\n\\frac{a}{b}\n```\n"))
+      (should-not (string-match-p "⧉" (buffer-string)))
+      (should (eq t (get-text-property (point-min)
+                                       'agent-shell-markdown-frozen))))))
+
 (ert-deftest agent-shell-markdown-render-functions-watermark-held-back ()
   ;; A render function returning `:watermark' holds the streaming frontier
   ;; behind its own open delimiter, even when it spans lines above the last
@@ -1555,7 +1582,9 @@ exercised by the editing in the -all-math-cases test.)"
   ;; A renderer that claims every math form the PR supports and wraps its
   ;; LaTeX in brackets: inline \(..\) as [..], and block \[..\], $$..$$ and
   ;; fenced ```math / ```latex as the multi-line [\n..\n].  It routes the
-  ;; fenced blocks by `:language' and keeps $$ inside a code block literal.
+  ;; fenced blocks by `:language', keeps $$ inside a fenced code block
+  ;; literal, and uses `:inline-code-ranges' to keep a \(..\) inside an
+  ;; inline `code` span literal too.
   (with-temp-buffer
     (let ((agent-shell-markdown-render-functions
            (list
@@ -1575,14 +1604,19 @@ exercised by the editing in the -all-math-cases test.)"
                     (put-text-property start (point)
                                        'agent-shell-markdown-frozen t))))
               ;; Inline / block delimiters, skipping matches that fall
-              ;; inside a non-math code block (so $$ in code stays literal).
+              ;; inside code: a non-math fenced block (so $$ in code stays
+              ;; literal) or an inline `code` span from
+              ;; `:inline-code-ranges' (so a literal \(..\) the agent meant
+              ;; as code stays literal).
               (let ((code-ranges
-                     (seq-keep
-                      (lambda (b)
-                        (unless (member (map-elt b :language) '("math" "latex"))
-                          (cons (map-nested-elt b '(:block :start))
-                                (map-nested-elt b '(:block :end)))))
-                      (map-elt context :source-blocks))))
+                     (append
+                      (map-elt context :inline-code-ranges)
+                      (seq-keep
+                       (lambda (b)
+                         (unless (member (map-elt b :language) '("math" "latex"))
+                           (cons (map-nested-elt b '(:block :start))
+                                 (map-nested-elt b '(:block :end)))))
+                       (map-elt context :source-blocks)))))
                 (dolist (spec (list (list (rx "\\(" (group (*? anychar)) "\\)") "[%s]")
                                     (list (rx "\\[" (group (*? anychar)) "\\]") "[\n%s\n]\n")
                                     (list (rx "$$" (group (*? anychar)) "$$") "[\n%s\n]\n")))
@@ -1603,6 +1637,7 @@ exercised by the editing in the -all-math-cases test.)"
 q = \"$$not math$$\"
 ```
 inline \\(a+b\\) here
+verbatim `\\(z\\)` code
 \\[x = y\\]
 $$E = mc^2$$
 ```math
@@ -1614,7 +1649,9 @@ $$E = mc^2$$
 ")
       (agent-shell-markdown-replace-markup)
       ;; Every math form rendered with its LaTeX in brackets; the $$ inside
-      ;; the python block stayed literal (its language kept it out of reach).
+      ;; the python block stayed literal (its language kept it out of
+      ;; reach), and the \(z\) inside the inline `code` span stayed literal
+      ;; too (`:inline-code-ranges' kept it out of reach).
       (should (equal (buffer-substring-no-properties (point-min) (point-max))
                      "
 python ⧉
@@ -1622,6 +1659,7 @@ python ⧉
 q = \"$$not math$$\"
 
 inline [a+b] here
+verbatim \\(z\\) code
 [
 x = y
 ]

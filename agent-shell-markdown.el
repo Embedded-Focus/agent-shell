@@ -215,6 +215,11 @@ CONTEXT keys:
                   with :language, :block (a :start/:end marker
                   range), :body, and :complete.
 
+  :inline-code-ranges  List of (start . end) marker ranges covering
+                  inline `code' span bodies, so a renderer can skip
+                  delimiters that fall inside a verbatim span (e.g. a
+                  literal `\\(x\\)' the agent meant as code, not math).
+
 Each function returns an alist (nil for no-op).  Recognised keys:
 
   :watermark  Buffer position the streaming frontier must not pass,
@@ -312,6 +317,15 @@ body un-fontified."
                                        (cons (map-nested-elt source-block '(:block :start))
                                              (map-nested-elt source-block '(:block :end))))
                                      source-blocks)))
+        ;; Inline `code' spans, computed before the renderers run so an
+        ;; external renderer can skip verbatim spans the same way it skips
+        ;; fenced blocks.  Nothing is frozen yet, so source blocks are the
+        ;; only avoid-range; the markers survive any buffer edits a
+        ;; renderer makes and are reused as an avoid-range for the built-in
+        ;; passes below.
+        (setq inline-ranges (agent-shell-markdown--make-markers
+                             (agent-shell-markdown--inline-code-ranges
+                              :avoid-ranges source-ranges)))
         ;; Run external renderers (when any are registered) before the
         ;; styling passes.  They tag their regions
         ;; `agent-shell-markdown-frozen', so the frozen ranges captured
@@ -319,13 +333,9 @@ body un-fontified."
         ;; skip them.
         (when agent-shell-markdown-render-functions
           (setq external-results (agent-shell-markdown--run-render-functions
-                                  source-blocks)))
+                                  source-blocks inline-ranges)))
         (setq rendered-ranges (agent-shell-markdown--make-markers
                                (agent-shell-markdown--frozen-ranges)))
-        (setq inline-ranges (agent-shell-markdown--make-markers
-                             (agent-shell-markdown--inline-code-ranges
-                              :avoid-ranges (agent-shell-markdown--sort-ranges
-                                             source-ranges rendered-ranges))))
         (setq avoid-ranges (agent-shell-markdown--sort-ranges
                             source-ranges rendered-ranges inline-ranges))
         (while (let ((italic-changed (agent-shell-markdown--replace-italics
@@ -381,17 +391,19 @@ body un-fontified."
        :external-candidates (seq-keep (lambda (result) (map-elt result :watermark))
                                       external-results)))))
 
-(defun agent-shell-markdown--run-render-functions (source-blocks)
+(defun agent-shell-markdown--run-render-functions (source-blocks inline-code-ranges)
   "Run `agent-shell-markdown-render-functions' with SOURCE-BLOCKS.
 
 Each registered function is called with a single alist context
-holding (:source-blocks . SOURCE-BLOCKS) and may render and freeze
-regions of the current (narrowed) buffer.  Returns the list of
-non-nil result alists, in hook order.
+holding (:source-blocks . SOURCE-BLOCKS) and
+(:inline-code-ranges . INLINE-CODE-RANGES) and may render and
+freeze regions of the current (narrowed) buffer.  Returns the list
+of non-nil result alists, in hook order.
 
 For example, with one renderer returning `((:watermark . 1200))'
 this returns `(((:watermark . 1200)))'."
-  (let ((context (list (cons :source-blocks source-blocks)))
+  (let ((context (list (cons :source-blocks source-blocks)
+                       (cons :inline-code-ranges inline-code-ranges)))
         (results '()))
     (run-hook-wrapped 'agent-shell-markdown-render-functions
                       (lambda (fn)
