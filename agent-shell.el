@@ -6181,6 +6181,16 @@ Each marked span is replaced by its `agent-shell-region-text' value."
                                   :shell-buffer shell-buffer
                                   :existing-only t)))
       (with-current-buffer viewport-buffer
+        ;; When a command is sent (e.g. a queued request executing)
+        ;; while the user is composing in the viewport edit buffer,
+        ;; preserve the draft so it can be restored on the next return
+        ;; to edit mode instead of being wiped by the view-mode switch.
+        (when (and (derived-mode-p 'agent-shell-viewport-edit-mode)
+                   (not (string-empty-p (string-trim (buffer-string))))
+                   (not agent-shell-viewport--compose-snapshot))
+          (setq agent-shell-viewport--compose-snapshot
+                `((:content . ,(buffer-string))
+                  (:location . ,(point)))))
         (agent-shell-viewport-view-mode)
         (agent-shell-viewport--initialize
          :prompt  prompt)))
@@ -6193,10 +6203,9 @@ Each marked span is replaced by its `agent-shell-region-text' value."
                :prompt content-blocks)
      :buffer (current-buffer)
      :on-success (lambda (acp-response)
-                   (when (equal (map-elt (agent-shell--state) :last-entry-type) "agent_message_chunk")
-                     (agent-shell--append-transcript
-                      :text "\n\n"
-                      :file-path agent-shell--transcript-file))
+                   (agent-shell--separate-transcript-after-agent-message
+                    :last-entry-type (map-elt (agent-shell--state) :last-entry-type)
+                    :file-path agent-shell--transcript-file)
                    ;; Tool call details are no longer needed after
                    ;; a session prompt request is finished.
                    ;; Avoid accumulating them unnecessarily.
@@ -6245,6 +6254,13 @@ Each marked span is replaced by its `agent-shell-region-text' value."
                      (when success
                        (agent-shell--process-pending-request))))
      :on-failure (lambda (acp-error raw-message)
+                   ;; A failed/interrupted turn may have stopped mid
+                   ;; agent_message_chunk, leaving the transcript body
+                   ;; without a trailing newline.  Separate it so the
+                   ;; next section header lands on its own line.
+                   (agent-shell--separate-transcript-after-agent-message
+                    :last-entry-type (map-elt agent-shell--state :last-entry-type)
+                    :file-path agent-shell--transcript-file)
                    ;; Display pending requests on failure.
                    (agent-shell--display-pending-requests)
                    (funcall (agent-shell--make-error-handler :state agent-shell--state :shell-buffer shell-buffer)
@@ -7399,8 +7415,7 @@ Uses AGENT-CWD to shorten file paths where necessary."
                                       (let ((char-start (map-elt region :char-start))
                                             (char-end (map-elt region :char-end))
                                             (max-preview-lines 5))
-                                        (if (equal (line-number-at-pos char-start)
-                                                   (line-number-at-pos char-end))
+                                        (if (= (count-lines char-start char-end) 1)
                                             ;; Same line region? Avoid numbering.
                                             (buffer-substring char-start char-end)
                                           (agent-shell--get-numbered-region
@@ -7426,7 +7441,11 @@ If CAP is non-nil, truncate at CAP."
     (save-excursion
       (goto-char from)
       (let* ((start-line (line-number-at-pos from))
-             (end-line (line-number-at-pos to))
+             (end-line (save-excursion
+                         (goto-char to)
+                         (when (and (bolp) (not (bobp)))
+                           (backward-char))
+                         (line-number-at-pos)))
              (lines '())
              (current-line start-line))
         (goto-char (point-min))
@@ -7650,8 +7669,12 @@ Available values:
         (:language . ,language)
         (:char-start . ,start)
         (:char-end . ,end)
-        (:line-start . ,(save-excursion (goto-char start) (line-number-at-pos)))
-        (:line-end . ,(save-excursion (goto-char end) (line-number-at-pos)))
+        (:line-start . ,(line-number-at-pos start))
+        (:line-end . ,(save-excursion
+                        (goto-char end)
+                        (when (and (bolp) (not (bobp)))
+                          (backward-char))
+                        (line-number-at-pos)))
         (:content . ,content)))))
 
 (cl-defun agent-shell--align-alist (&key data columns (separator "  ") joiner)
@@ -8367,6 +8390,19 @@ For example:
       (error
        (message "Error writing to transcript: %S" err)))))
 
+(cl-defun agent-shell--separate-transcript-after-agent-message (&key last-entry-type file-path)
+  "Append a blank-line separator to the transcript at FILE-PATH.
+
+Write the separator only when LAST-ENTRY-TYPE is
+\"agent_message_chunk\", i.e. the turn ended while streaming an
+agent message.  An agent message chunk may end without a trailing
+newline (for example when interrupted), and without this separator
+the next transcript section header lands on the same line as the
+message body.  Call this at turn end on both the success and
+failure paths."
+  (when (equal last-entry-type "agent_message_chunk")
+    (agent-shell--append-transcript :text "\n\n" :file-path file-path)))
+
 (defun agent-shell--extract-tool-parameters (raw-input)
   "Extract and format tool parameters from RAW-INPUT.
 Returns a formatted string of key parameters, or nil if no relevant
@@ -8549,6 +8585,20 @@ commands when the agent has reported them."
   (if (shell-maker-busy)
       (agent-shell--enqueue-request :prompt prompt)
     (agent-shell--insert-to-shell-buffer :text prompt :submit t :no-focus t)))
+
+(defun agent-shell-narrow-to-block (count)
+  "Narrow to the last COUNT navigatable blocks in the current buffer.
+The buffer must be an `agent-shell-mode' buffer.  Narrow from the
+start of the COUNTth-from-last navigatable block to `point-max'."
+  (interactive "P")
+  (unless (derived-mode-p 'agent-shell-mode)
+    (error "Not in an agent-shell buffer."))
+  (save-excursion
+    (widen)
+    (goto-char (point-max))
+    (dotimes (_ (or count 1)) (agent-shell-ui-backward-block))
+    (when-let* ((block (agent-shell-ui--block-range :position (point))))
+      (narrow-to-region (map-elt block :start) (point-max)))))
 
 (defun agent-shell-quote-region ()
   "Quote the active region into the shell's latest prompt.

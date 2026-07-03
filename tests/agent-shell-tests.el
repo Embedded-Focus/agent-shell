@@ -664,11 +664,12 @@ is handed to `agent-shell--set-session-title'."
 (ert-deftest agent-shell--get-numbered-region-test ()
   "Test `agent-shell--get-numbered-region' preserves selection and respects TRIM."
   (with-temp-buffer
-    ;; Lines: 1="", 2="foo", 3="", 4="bar", 5="" (trailing newline).
+    ;; Lines: 1="", 2="foo", 3="", 4="bar", 5="" (including trailing newline).
     (insert "
 foo
 
 bar
+
 ")
     ;; Without TRIM: empty boundary lines (1 and 5) are preserved.
     (should (equal (agent-shell--get-numbered-region
@@ -688,7 +689,25 @@ bar
                     :trim t)
                    "   2: foo
    3: 
-   4: bar"))))
+   4: bar")))
+  (with-temp-buffer
+    (insert "foo
+bar
+baz
+")
+    (let (from to)
+      (goto-char (point-min))
+      (forward-line 1)
+      (setq from (point))
+      (forward-line 1)
+      (setq to (point))
+      ;; When selecting whole lines including trailing newline, adjust
+      ;; region-end
+      (should (equal (agent-shell--get-numbered-region
+                    :buffer (current-buffer)
+                    :from from
+                    :to to)
+                   "   2: bar")))))
 
 (ert-deftest agent-shell--expand-truncated-regions-test ()
   "Test `agent-shell--expand-truncated-regions' substitutes marked spans for their full text."
@@ -844,6 +863,53 @@ bar
         (should (equal (map-elt data :stop-reason) "end_turn"))
         (should (equal (map-elt (map-elt data :usage) :total-tokens)
                        1500))))))
+
+(ert-deftest agent-shell--send-command-preserves-viewport-edit-draft-test ()
+  "Sending a command must not discard an in-progress viewport edit draft.
+
+When a queued request is processed while the user is composing a
+message in the viewport edit buffer, `agent-shell--send-command'
+switches the viewport to view mode and re-initializes (erasing)
+the buffer.  The draft must be saved to the compose snapshot so
+it can be restored when the user returns to edit mode."
+  (let ((agent-shell-header-style 'graphical)
+        (agent-shell-show-busy-indicator nil)
+        (agent-shell--state (list (cons :buffer (current-buffer))
+                                  (cons :event-subscriptions nil)
+                                  (cons :client 'test-client)
+                                  (cons :session (list (cons :id "test-session")
+                                                       (cons :title "a title")))
+                                  (cons :last-entry-type nil)
+                                  (cons :tool-calls nil)
+                                  (cons :idle-timer nil))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'agent-shell--send-request)
+               (lambda (&rest _)))
+              ((symbol-function 'agent-shell--append-transcript)
+               (lambda (&rest _)))
+              ((symbol-function 'agent-shell--set-session-title)
+               (lambda (&rest _)))
+              ((symbol-function 'agent-shell-viewport--update-header)
+               (lambda (&rest _)))
+              ((symbol-function 'agent-shell-viewport--position)
+               (lambda (&rest _) nil)))
+      (with-temp-buffer
+        (let ((viewport-buffer (current-buffer)))
+          (agent-shell-viewport-edit-mode)
+          (insert "my important draft")
+          (cl-letf (((symbol-function 'agent-shell-viewport--buffer)
+                     (lambda (&rest _) viewport-buffer)))
+            (agent-shell--send-command
+             :prompt "queued prompt"
+             :shell-buffer (current-buffer)))
+          ;; The buffer now shows the submitted prompt in view mode,
+          ;; and the in-progress draft was wiped from the buffer...
+          (should-not (string-match-p "my important draft" (buffer-string)))
+          ;; ...but the draft survived in the compose snapshot.
+          (should agent-shell-viewport--compose-snapshot)
+          (should (equal (map-elt agent-shell-viewport--compose-snapshot :content)
+                         "my important draft")))))))
 
 (ert-deftest agent-shell--format-diff-as-text-test ()
   "Test `agent-shell--format-diff-as-text' function."
@@ -1409,6 +1475,52 @@ code block content
   ;; only to LLM text.
   (should (equal (agent-shell--indent-markdown-headers "### Tool Call [completed]: grep")
                  "##### Tool Call [completed]: grep")))
+
+(ert-deftest agent-shell--separate-transcript-after-agent-message-test ()
+  "Ensure a turn ending mid-agent-message leaves a blank-line separator.
+
+Reproduces the interrupted-turn bug where an interrupted agent
+message had no trailing newline, so the next `## User' heading was
+glued onto the same line as the partial message:
+
+    Actually, I should## User (2026-06-20 19:45:42)
+
+The separator must be written whether the turn ends in success or
+failure (interrupt), so `agent-shell--append-transcript' can be
+driven by a single helper on both paths."
+  (let ((file (make-temp-file "agent-shell-transcript")))
+    (unwind-protect
+        ;; `agent-shell--ensure-transcript-file' guards on the major mode
+        ;; and creates the file with a header; the file is pre-seeded
+        ;; here, so stub it to just hand back the path and exercise the
+        ;; real conditional + real `write-region' append.
+        (cl-letf (((symbol-function 'agent-shell--ensure-transcript-file)
+                   (lambda () file)))
+          ;; Simulate content left by an interrupted agent_message_chunk:
+          ;; a header plus partial body with NO trailing newline.
+          (write-region (format "## Agent (%s)\n\nActually, I should"
+                                (format-time-string "%F %T"))
+                        nil file)
+          ;; The turn ending mid-message must add the blank-line separator.
+          (agent-shell--separate-transcript-after-agent-message
+           :last-entry-type "agent_message_chunk"
+           :file-path file)
+          (with-temp-buffer
+            (insert-file-contents file)
+            ;; The next `## User' must land on its own line, i.e. the
+            ;; agent's partial body must be followed by a blank line.
+            (should (string-suffix-p "Actually, I should\n\n"
+                                     (buffer-string))))
+          ;; When the turn did not end on an agent message, no separator
+          ;; is written (avoids spurious blank lines elsewhere).
+          (let ((size-before (file-attribute-size
+                              (file-attributes file))))
+            (agent-shell--separate-transcript-after-agent-message
+             :last-entry-type "tool_call"
+             :file-path file)
+            (should (= (file-attribute-size (file-attributes file))
+                       size-before))))
+      (delete-file file))))
 
 (ert-deftest agent-shell-mcp-servers-test ()
   "Test `agent-shell-mcp-servers' function normalization."
