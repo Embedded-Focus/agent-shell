@@ -33,6 +33,10 @@ With agent-shell, you can chat with the likes of Gemini CLI, Claude Agent, Auggi
 
 [[https://www.youtube.com/watch?v=HJQ86HuSIJI][https://img.youtube.com/vi/HJQ86HuSIJI/0.jpg]]
 
+[[https://www.youtube.com/watch?v=7fdHeUoRRgg][Bending Emacs Episode 14: Prototyping iOS apps with agent-shell, artist-mode, and Claude Skills - YouTube]]
+
+[[https://www.youtube.com/watch?v=7fdHeUoRRgg][https://img.youtube.com/vi/7fdHeUoRRgg/0.jpg]]
+
 * News
 
 Do take a look at all these blog posts as they showcase most =agent-shell= features.
