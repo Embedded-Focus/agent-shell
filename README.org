@@ -106,7 +106,7 @@ Optionally: You may also need [[https://code.claude.com/docs/en/overview][Claude
 
 *** Codex
 
-For OpenAI's Codex, install [[https://github.com/zed-industries/codex-acp][zed/codex-acp]] and ensure the `codex-acp` executable is in PATH.
+For OpenAI's Codex, install [[https://github.com/agentclientprotocol/codex-acp][@agentclientprotocol/codex-acp]] (=npm install -g @agentclientprotocol/codex-acp=) and ensure the =codex-acp= executable is in PATH.
 
 *** Gemini CLI
 
