@@ -3145,11 +3145,12 @@ a `status' key and a `content' or `step' key."
   "Make button with TEXT, HELP text, KIND, KEYMAP, ACTION, and PROPERTIES.
 PROPERTIES is an optional plist of additional text properties to apply."
   ;; Use [ ] brackets in TUI which cannot render the box border.
-  (let ((button (propertize
+  (let ((button (agent-shell--add-text-properties
                  (if (display-graphic-p)
                      (format " %s " text)
                    (format "[ %s ]" text))
                  'font-lock-face '(:box t)
+                 'face '(:box t)
                  'help-echo help
                  'pointer 'hand
                  'keymap (let ((map (make-sparse-keymap)))
