@@ -949,6 +949,53 @@ bar
                  (list (cons :config-options options))
                  "model"))))
 
+(ert-deftest agent-shell--config-option-by-category-prefers-id-match-test ()
+  "Test `agent-shell--config-option-by-category' tie-breaks on `:id'.
+
+Cline tags both its `provider' and `model' options with category
+\"model\".  Matching on category alone would resolve \"model\" to the
+first match (provider); the lookup must prefer the option whose `:id'
+equals the category."
+  (let* ((options (agent-shell--normalize-config-options
+                   [((id . "provider")
+                     (name . "Provider")
+                     (category . "model")
+                     (type . "select")
+                     (currentValue . "openai-codex")
+                     (options . [((value . "cline") (name . "Cline"))
+                                 ((value . "openai-codex")
+                                  (name . "OpenAI ChatGPT Subscription"))]))
+                    ((id . "model")
+                     (name . "Model")
+                     (category . "model")
+                     (type . "select")
+                     (currentValue . "gpt-5.5")
+                     (options . [((value . "gpt-5.5") (name . "GPT-5.5"))]))]))
+         (state (list (cons :config-options options))))
+    ;; "model" category must resolve to the model option, not provider.
+    (should (equal (map-elt (agent-shell--config-option-by-category state "model") :id)
+                   "model"))
+    ;; And available models must list models, not providers.
+    (should (equal (mapcar (lambda (m) (map-elt m :model-id))
+                           (agent-shell--get-available-models state))
+                   '("gpt-5.5")))))
+
+(ert-deftest agent-shell--config-option-by-category-falls-back-to-first-match-test ()
+  "Test `agent-shell--config-option-by-category' falls back when no `:id' match.
+
+When a single option carries a category but its `:id' differs from
+the category, the option is still returned."
+  (let* ((options (agent-shell--normalize-config-options
+                   [((id . "model_id")
+                     (name . "Model")
+                     (category . "model")
+                     (type . "select")
+                     (currentValue . "sonnet")
+                     (options . [((value . "sonnet") (name . "Sonnet"))]))]))
+         (state (list (cons :config-options options))))
+    (should (equal (map-elt (agent-shell--config-option-by-category state "model") :id)
+                   "model_id"))))
+
 (ert-deftest agent-shell--session-from-response-config-options-test ()
   "Test `agent-shell--session-from-response' stores config options."
   (let ((session (agent-shell--session-from-response
@@ -3440,6 +3487,40 @@ interaction (e.g. \"1/2\" after switching to the latest interaction)."
             (should (equal rendered-position '((:current . 2) (:total . 2))))))
       (kill-buffer viewport-buffer)
       (kill-buffer shell-buffer))))
+
+(ert-deftest agent-shell--refresh-session-title-skips-when-list-unsupported ()
+  "Test `agent-shell--refresh-session-title' sends no request without `list'.
+
+Agents that don't advertise the `list' session capability (e.g. Cline)
+would otherwise get a `session/list' request on every turn, failing
+with \"Method not found\"."
+  (with-temp-buffer
+    (let ((request-sent nil)
+          (state (list (cons :client 'test-client)
+                       (cons :supports-session-list nil)
+                       (cons :session (list (cons :id "session-123"))))))
+      (setq-local agent-shell--state state)
+      (cl-letf (((symbol-function 'acp-send-request)
+                 (lambda (&rest _args)
+                   (setq request-sent t))))
+        (agent-shell--refresh-session-title)
+        (should-not request-sent)))))
+
+(ert-deftest agent-shell--refresh-session-title-fetches-when-list-supported ()
+  "Test `agent-shell--refresh-session-title' sends `session/list' when supported."
+  (with-temp-buffer
+    (let ((sent-method nil)
+          (state (list (cons :client 'test-client)
+                       (cons :supports-session-list t)
+                       (cons :session (list (cons :id "session-123"))))))
+      (setq-local agent-shell--state state)
+      (cl-letf (((symbol-function 'agent-shell--resolve-path)
+                 (lambda (path) path))
+                ((symbol-function 'acp-send-request)
+                 (lambda (&rest args)
+                   (setq sent-method (map-elt (plist-get args :request) :method)))))
+        (agent-shell--refresh-session-title)
+        (should (equal sent-method "session/list"))))))
 
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here

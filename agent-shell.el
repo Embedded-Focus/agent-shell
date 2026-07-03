@@ -6107,8 +6107,12 @@ Does nothing if TITLE is empty or matches the current value."
 Sends a `session/list' ACP request and writes any non-empty `title'
 field on the matching session via `agent-shell--set-session-title'.  Agents
 that don't supply a title (e.g. Claude Code) are no-ops; the seeded
-first-prompt title is left in place."
-  (when-let* ((client (map-elt agent-shell--state :client))
+first-prompt title is left in place.
+
+Does nothing if the agent doesn't advertise the `list' session
+capability, since the `session/list' request would otherwise fail."
+  (when-let* ((_ (map-elt agent-shell--state :supports-session-list))
+              (client (map-elt agent-shell--state :client))
               (session-id (map-nested-elt agent-shell--state '(:session :id))))
     (acp-send-request
      :client client
@@ -8287,20 +8291,28 @@ Returns the file path, or nil if disabled."
       (condition-case err
           (let ((agent-name (or (map-nested-elt agent-shell--state '(:agent-config :mode-line-name))
                                 (map-nested-elt agent-shell--state '(:agent-config :buffer-name))
-                                "Unknown Agent")))
+                                "Unknown Agent"))
+                (session-id (map-nested-elt agent-shell--state '(:session :id)))
+                (model-id (map-nested-elt agent-shell--state '(:session :model-id))))
             (write-region
              (format "# Agent Shell Transcript
 
 **Agent:** %s
 **Started:** %s
-**Working Directory:** %s
+**Working Directory:** %s%s%s
 
 ---
 
 "
                      agent-name
                      (format-time-string "%F %T")
-                     (agent-shell-cwd))
+                     (agent-shell-cwd)
+                     (if session-id
+                         (format "\n**Session ID:** %s" session-id)
+                       "")
+                     (if model-id
+                         (format "\n**Model:** %s" model-id)
+                       ""))
              nil filepath nil 'no-message)
             (message "Created %s"
                      (agent-shell--shorten-paths filepath t)))

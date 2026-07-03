@@ -119,18 +119,29 @@ For example:
             (agent-shell--config-options state)))
 
 (defun agent-shell--config-option-by-category (state category)
-  "Return first config option in STATE matching CATEGORY, or nil.
+  "Return a config option in STATE matching CATEGORY, or nil.
 
 CATEGORY may be nil for uncategorized options.  Uses `equal' for
 nil-safe comparison.
+
+When several options share CATEGORY, prefers the one whose `:id'
+equals CATEGORY, falling back to the first match.  Some agents (e.g.
+Cline) tag multiple options with the same category -- both their
+`provider' and `model' options use category \"model\" -- so matching
+on category alone could otherwise resolve \"model\" to the provider
+option.
 
 For example:
 
   (agent-shell--config-option-by-category state \"model\")
   => \\='((:id . \"model\") (:category . \"model\") ...)"
-  (seq-find (lambda (option)
-              (equal category (map-elt option :category)))
-            (agent-shell--config-options state)))
+  (let ((matches (seq-filter (lambda (option)
+                               (equal category (map-elt option :category)))
+                             (agent-shell--config-options state))))
+    (or (seq-find (lambda (option)
+                    (equal category (map-elt option :id)))
+                  matches)
+        (car matches))))
 
 (defun agent-shell--select-config-options (state)
   "Return selectable (type = \"select\") config options from STATE."
