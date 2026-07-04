@@ -381,6 +381,20 @@ print(\"hi\")
     (should (eq t (get-text-property 13 'agent-shell-markdown-frozen s)))
     (should (null (get-text-property 0 'agent-shell-markdown-frozen s)))))
 
+(ert-deftest agent-shell-markdown-convert-rendered-text-marked-fontified ()
+  ;; Rendered chars carry `fontified t' so jit-lock never re-runs over
+  ;; them.  We style via `face'/`font-lock-face' text properties, not
+  ;; font-lock keywords, so a jit-lock pass applies nothing — but its
+  ;; firing mid-drag disturbs mouse drag-tracking and collapses the
+  ;; selection to empty, silently breaking mouse copy of rendered text.
+  ;; Marking `fontified t' up front prevents that pass entirely.
+  (let ((s (agent-shell-markdown-convert "hello **world**")))
+    (should (eq t (get-text-property 0 'fontified s)))
+    (should (eq t (get-text-property (1- (length s)) 'fontified s))))
+  ;; Also holds for fenced source blocks (the reported failure case).
+  (let ((s (agent-shell-markdown-convert "```\ncode\n```")))
+    (should (eq t (get-text-property 1 'fontified s)))))
+
 (ert-deftest agent-shell-markdown-source-block-streamed-in-chunks ()
   ;; Real-world LLM streaming: a fenced code block arrives in small
   ;; chunks that split the opening fence, the language line, body
