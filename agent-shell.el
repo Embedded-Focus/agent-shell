@@ -1559,6 +1559,18 @@ behind.  Signals a `user-error' when point is not on a link."
         (message "Copied URL: %s" url))
     (user-error "No link at point")))
 
+(defun agent-shell-copy-source-block-at-point (&optional pos)
+  "Copy the rendered fenced code block body at POS (or point) to the kill ring.
+
+Copies the code without its fences or language label.  Signals a
+`user-error' when point is not on a rendered code block body."
+  (interactive)
+  (if-let* ((body (agent-shell-markdown-source-block-at-point pos)))
+      (progn
+        (kill-new body)
+        (message "Copied code block"))
+    (user-error "No code block at point")))
+
 (cl-defun agent-shell--permission-pending-p (&key shell-buffer tool-call-id)
   "Return non-nil if a permission request is pending.
 When SHELL-BUFFER is non-nil, check that buffer instead of the current one.

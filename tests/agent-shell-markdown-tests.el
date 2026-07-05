@@ -1792,6 +1792,22 @@ for a fully-selected buffer."
     (should (equal (agent-shell-markdown-link-url-at-point)
                    "https://example.com"))))
 
+;;; Exposing rendered code block bodies at point.
+
+(ert-deftest agent-shell-markdown-source-block-at-point ()
+  (with-temp-buffer
+    (insert "```python\ndef foo():\n    return 1\n```\n")
+    (agent-shell-markdown-replace-markup :force t :render-images nil)
+    (goto-char (point-min))
+    (search-forward "def foo")
+    ;; Point on the body returns the code without fences or label.
+    (should (equal (agent-shell-markdown-source-block-at-point (1- (point)))
+                   "def foo():\n    return 1"))
+    ;; The language label above the body is not the body.
+    (goto-char (point-min))
+    (search-forward "⧉")
+    (should-not (agent-shell-markdown-source-block-at-point (1- (point))))))
+
 (provide 'agent-shell-markdown-tests)
 
 ;;; agent-shell-markdown-tests.el ends here

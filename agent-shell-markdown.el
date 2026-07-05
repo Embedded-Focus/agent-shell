@@ -2010,6 +2010,24 @@ can recover the link once the `(url)' markup is gone from the buffer.
 Returns nil when POS is not on a rendered link."
   (get-text-property (or pos (point)) 'agent-shell-markdown-url))
 
+(defun agent-shell-markdown-source-block-at-point (&optional pos)
+  "Return the rendered fenced code block body at POS (or point), when available.
+
+Returns the code body (without the fences or the language label) when
+POS lands on a rendered block's body, the region the renderer tags
+with `agent-shell-markdown-source-block-body'.  Returns nil otherwise;
+the language label above the body copies its own body via RET."
+  (setq pos (or pos (point)))
+  (when (get-text-property pos 'agent-shell-markdown-source-block-body)
+    (buffer-substring-no-properties
+     (or (previous-single-property-change
+          (min (1+ pos) (point-max))
+          'agent-shell-markdown-source-block-body)
+         (point-min))
+     (or (next-single-property-change
+          pos 'agent-shell-markdown-source-block-body)
+         (point-max)))))
+
 (cl-defun agent-shell-markdown--render-table-source (&key source window)
   "Render SOURCE (markdown table text) to a propertized string.
 
