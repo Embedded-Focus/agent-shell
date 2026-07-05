@@ -705,6 +705,11 @@ and a keymap that opens the URL."
                                   (lambda () (interactive)
                                     (agent-shell-markdown--open-link url))))
               (put-text-property markup-start end 'mouse-face 'highlight)
+              ;; Expose the target as recoverable metadata so copy/export
+              ;; integrations can reconstruct the link once the `(url)' is
+              ;; gone from the buffer (see
+              ;; `agent-shell-markdown-link-url-at-point').
+              (put-text-property markup-start end 'agent-shell-markdown-url url)
               (when source
                 (put-text-property markup-start end
                                    'agent-shell-markdown-source source))))))))))
@@ -1995,6 +2000,15 @@ always fully inside the markup span, so the containment test holds)."
          parts)
         (setq pos limit)))
     (apply #'concat (nreverse parts))))
+
+(defun agent-shell-markdown-link-url-at-point (&optional pos)
+  "Return the rendered Markdown link URL at POS (or point), when available.
+
+The renderer stamps `[title](url)' links with the target URL on the
+`agent-shell-markdown-url' text property, so copy/export integrations
+can recover the link once the `(url)' markup is gone from the buffer.
+Returns nil when POS is not on a rendered link."
+  (get-text-property (or pos (point)) 'agent-shell-markdown-url))
 
 (cl-defun agent-shell-markdown--render-table-source (&key source window)
   "Render SOURCE (markdown table text) to a propertized string.

@@ -1546,6 +1546,19 @@ Interactively, operates on the active region."
   (setq deactivate-mark t)
   (message "Copied as markdown"))
 
+(defun agent-shell-copy-link-url-at-point (&optional pos)
+  "Copy the rendered Markdown link URL at POS (or point) to the kill ring.
+
+Rendered links show only their title; this recovers the target URL
+from the `agent-shell-markdown-url' text property the renderer leaves
+behind.  Signals a `user-error' when point is not on a link."
+  (interactive)
+  (if-let* ((url (agent-shell-markdown-link-url-at-point pos)))
+      (progn
+        (kill-new url)
+        (message "Copied URL: %s" url))
+    (user-error "No link at point")))
+
 (cl-defun agent-shell--permission-pending-p (&key shell-buffer tool-call-id)
   "Return non-nil if a permission request is pending.
 When SHELL-BUFFER is non-nil, check that buffer instead of the current one.

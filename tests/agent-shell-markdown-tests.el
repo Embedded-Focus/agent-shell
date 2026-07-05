@@ -1765,6 +1765,33 @@ for a fully-selected buffer."
                     (point-min) (point-max))
                    "A **paragraph** here.\n\nsecond line.\n"))))
 
+;;; Exposing rendered link URLs (issue #669).
+
+(ert-deftest agent-shell-markdown-link-exposes-url ()
+  (with-temp-buffer
+    (insert "see [docs](https://example.com) ok")
+    (agent-shell-markdown-replace-markup :force t :render-images nil)
+    ;; Markup is replaced with the visible title.
+    (should (equal (buffer-string) "see docs ok"))
+    (goto-char (point-min))
+    (search-forward "docs")
+    (let ((on-link (1- (point))))
+      ;; The URL is recoverable from a text property on the title.
+      (should (equal (agent-shell-markdown-link-url-at-point on-link)
+                     "https://example.com"))
+      ;; Click behaviour is preserved (keymap still on the title).
+      (should (get-text-property on-link 'keymap)))
+    ;; Off the link there is no URL.
+    (should-not (agent-shell-markdown-link-url-at-point (point-min)))))
+
+(ert-deftest agent-shell-markdown-link-url-at-point-defaults-to-point ()
+  (with-temp-buffer
+    (insert "[docs](https://example.com)")
+    (agent-shell-markdown-replace-markup :force t :render-images nil)
+    (goto-char (1+ (point-min)))
+    (should (equal (agent-shell-markdown-link-url-at-point)
+                   "https://example.com"))))
+
 (provide 'agent-shell-markdown-tests)
 
 ;;; agent-shell-markdown-tests.el ends here
