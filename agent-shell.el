@@ -260,7 +260,7 @@ RENDER-IMAGES toggles image rendering; HIGHLIGHT-BLOCKS toggles
 source-block highlighting.
 
 Deprecated in favour of `agent-shell-markdown-replace-markup' (the
-in-place renderer).  Kept as the current default for backwards
+in-place renderer, now the default).  Kept for backwards
 compatibility; will be removed once the in-place renderer has
 settled and `markdown-overlays' is no longer a dependency."
   (let ((markdown-overlays-render-images render-images)
@@ -280,15 +280,16 @@ scan the whole accessible portion.
 
 Two implementations ship with agent-shell:
 
-  - `agent-shell--markdown-overlays-put' (default, deprecated):
+  - `agent-shell-markdown-replace-markup' (default): in-place
+    renderer that rewrites markup characters into propertized text
+    (no overlays).  Faster on streaming workloads by rewriting
+    buffer.
+
+  - `agent-shell--markdown-overlays-put' (deprecated):
     overlay-based renderer wrapping `markdown-overlays-put'.
     Honors both keyword arguments via the corresponding
     `markdown-overlays-*' variables.  Will be removed once the
     in-place renderer has settled.
-
-  - `agent-shell-markdown-replace-markup': in-place renderer that
-    rewrites markup characters into propertized text (no
-    overlays).  Faster on streaming workloads by rewriting buffer.
 
 Set to a custom function to plug in a different renderer; the
 function should accept `&key render-images highlight-blocks
@@ -1526,6 +1527,24 @@ associated viewport buffer exists, switch to that instead."
         (kill-new session-id)
         (message "Copied session ID: %s" session-id))
     (user-error "No active session")))
+
+(defun agent-shell-copy-as-markdown (beg end)
+  "Copy the region between BEG and END to the kill ring as markdown.
+
+A plain copy yields exactly the visible (rendered) text, with no
+markup, handy for pasting a command straight into a terminal.
+This command instead reconstructs the agent's original markdown for
+every rendered construct fully contained in the region: `**bold**'
+\(including nested `**bold _and italic_**'), `## headings', links,
+fenced code blocks with their ```language fences, and tables.  A
+construct only partially selected (for example a single line of a
+code block) is copied verbatim as shown.
+
+Interactively, operates on the active region."
+  (interactive "r")
+  (kill-new (agent-shell-markdown-reconstruct beg end))
+  (setq deactivate-mark t)
+  (message "Copied as markdown"))
 
 (cl-defun agent-shell--permission-pending-p (&key shell-buffer tool-call-id)
   "Return non-nil if a permission request is pending.

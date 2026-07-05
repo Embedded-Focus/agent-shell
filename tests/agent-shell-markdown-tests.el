@@ -1692,6 +1692,79 @@ E = mc^2
 
 ")))))
 
+;;; Reconstructing markdown from rendered text (copy-as-markdown).
+
+(defun agent-shell-markdown-tests--roundtrip (markdown)
+  "Render MARKDOWN, then reconstruct it from the whole buffer.
+Returns the reconstructed markdown, which should equal MARKDOWN
+for a fully-selected buffer."
+  (with-temp-buffer
+    (insert markdown)
+    (agent-shell-markdown-replace-markup :force t :render-images nil)
+    (agent-shell-markdown-reconstruct (point-min) (point-max))))
+
+(ert-deftest agent-shell-markdown-reconstruct-inline ()
+  (should (equal (agent-shell-markdown-tests--roundtrip
+                  "Some **bold**, *italic*, `code` and a [link](https://x.com).\n")
+                 "Some **bold**, *italic*, `code` and a [link](https://x.com).\n")))
+
+(ert-deftest agent-shell-markdown-reconstruct-header ()
+  (should (equal (agent-shell-markdown-tests--roundtrip "## My title\n")
+                 "## My title\n")))
+
+(ert-deftest agent-shell-markdown-reconstruct-fenced-block ()
+  (should (equal (agent-shell-markdown-tests--roundtrip
+                  "```python\ndef foo():\n    return 1\n```\n")
+                 "```python\ndef foo():\n    return 1\n```\n")))
+
+(ert-deftest agent-shell-markdown-reconstruct-table ()
+  (should (equal (agent-shell-markdown-tests--roundtrip
+                  "| A | B |\n|---|---|\n| 1 | 2 |\n")
+                 "| A | B |\n|---|---|\n| 1 | 2 |\n")))
+
+(ert-deftest agent-shell-markdown-reconstruct-mixed ()
+  (let ((markdown (concat "# Title\n\n"
+                          "A **bold** paragraph.\n\n"
+                          "```js\nx = 1\n```\n\n"
+                          "> a quote\n\n"
+                          "- item *one*\n- item two\n")))
+    (should (equal (agent-shell-markdown-tests--roundtrip markdown) markdown))))
+
+(ert-deftest agent-shell-markdown-reconstruct-nested ()
+  ;; Nested and overlapping markup reconstructs faithfully, including
+  ;; the mirror cases (`**_x_**' vs `[**b**](u)') where two constructs
+  ;; land on the same characters.
+  (dolist (markdown '("This is **bold _and italic_ inside**."
+                      "**_x_**"
+                      "a link with [**bold** text](https://x.com) inside"
+                      "**bold `code` and _italic_ end**"
+                      "## A **big** title\n"))
+    (should (equal (agent-shell-markdown-tests--roundtrip markdown) markdown))))
+
+(ert-deftest agent-shell-markdown-reconstruct-partial-selection-is-verbatim ()
+  ;; A construct only partially covered by the region is copied as shown
+  ;; (visible text), not reconstructed to its source.
+  (with-temp-buffer
+    (insert "Some **bold text** here.\n")
+    (agent-shell-markdown-replace-markup :force t :render-images nil)
+    ;; Rendered buffer is "Some bold text here.\n"; selecting from the
+    ;; middle of the span through the end must not restore any `**'.
+    (should (equal (agent-shell-markdown-reconstruct
+                    (+ (point-min) 7) (point-max))
+                   "ld text here.\n"))))
+
+(ert-deftest agent-shell-markdown-reconstruct-across-streaming ()
+  ;; Markup split unclosed across two render passes still reconstructs.
+  (with-temp-buffer
+    (insert "A **para")
+    (agent-shell-markdown-replace-markup :render-images nil)
+    (goto-char (point-max))
+    (insert "graph** here.\n\nsecond line.\n")
+    (agent-shell-markdown-replace-markup :render-images nil)
+    (should (equal (agent-shell-markdown-reconstruct
+                    (point-min) (point-max))
+                   "A **paragraph** here.\n\nsecond line.\n"))))
+
 (provide 'agent-shell-markdown-tests)
 
 ;;; agent-shell-markdown-tests.el ends here

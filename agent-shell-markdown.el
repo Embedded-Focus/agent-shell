@@ -205,6 +205,15 @@ emphasis passes, so raw delimiters are claimed before those passes
 could mangle them; a renderer should skip already-frozen content
 so streaming re-runs don't reprocess it.
 
+To take part in `agent-shell-copy-as-markdown', a renderer should
+also put the `agent-shell-markdown-source' text property on its
+rendered region, holding the original markdown (e.g. the `$$...$$'
+LaTeX) as a string.  Copying reconstructs each fully-selected span
+from that property, so the region yields its source rather than its
+visible text — the same mechanism fenced blocks and tables use.  A
+text property (not an overlay) is required so it survives being
+copied into another buffer (e.g. the viewport).
+
 CONTEXT keys:
 
   :source-blocks  List of fenced-block descriptors (see
@@ -448,13 +457,19 @@ world.\" with face `agent-shell-markdown-bold' on \"world\"."
             (goto-char (cdr avoid))
           (let ((text (buffer-substring
                        (or (match-beginning 2) (match-beginning 3))
-                       (or (match-end 2) (match-end 3)))))
+                       (or (match-end 2) (match-end 3))))
+                (source (unless (get-text-property markup-start
+                                                   'agent-shell-markdown-source)
+                          (agent-shell-markdown-reconstruct
+                           markup-start markup-end))))
             (delete-region markup-start markup-end)
             (goto-char markup-start)
             (insert text)
-            (add-face-text-property markup-start
-                                    (+ markup-start (length text))
-                                    'agent-shell-markdown-bold)
+            (let ((end (+ markup-start (length text))))
+              (add-face-text-property markup-start end 'agent-shell-markdown-bold)
+              (when source
+                (put-text-property markup-start end
+                                   'agent-shell-markdown-source source)))
             (setq changed t)))))
     changed))
 
@@ -490,13 +505,19 @@ world.\" with face `agent-shell-markdown-italic' on \"world\"."
             (goto-char (cdr avoid))
           (let ((text (buffer-substring
                        (or (match-beginning 2) (match-beginning 4))
-                       (or (match-end 2) (match-end 4)))))
+                       (or (match-end 2) (match-end 4))))
+                (source (unless (get-text-property markup-start
+                                                   'agent-shell-markdown-source)
+                          (agent-shell-markdown-reconstruct
+                           markup-start markup-end))))
             (delete-region markup-start markup-end)
             (goto-char markup-start)
             (insert text)
-            (add-face-text-property markup-start
-                                    (+ markup-start (length text))
-                                    'agent-shell-markdown-italic)
+            (let ((end (+ markup-start (length text))))
+              (add-face-text-property markup-start end 'agent-shell-markdown-italic)
+              (when source
+                (put-text-property markup-start end
+                                   'agent-shell-markdown-source source)))
             (setq changed t)))))
     changed))
 
@@ -522,13 +543,20 @@ For example, the buffer \"a ~~b~~ c\" becomes \"a b c\" with face
                      markup-start markup-end avoid-ranges)))
         (if avoid
             (goto-char (cdr avoid))
-          (let ((text (buffer-substring (match-beginning 1) (match-end 1))))
+          (let ((text (buffer-substring (match-beginning 1) (match-end 1)))
+                (source (unless (get-text-property markup-start
+                                                   'agent-shell-markdown-source)
+                          (agent-shell-markdown-reconstruct
+                           markup-start markup-end))))
             (delete-region markup-start markup-end)
             (goto-char markup-start)
             (insert text)
-            (add-face-text-property markup-start
-                                    (+ markup-start (length text))
-                                    'agent-shell-markdown-strikethrough)
+            (let ((end (+ markup-start (length text))))
+              (add-face-text-property markup-start end
+                                      'agent-shell-markdown-strikethrough)
+              (when source
+                (put-text-property markup-start end
+                                   'agent-shell-markdown-source source)))
             (setq changed t)))))
     changed))
 
@@ -563,6 +591,10 @@ with face `agent-shell-markdown-header-2' on \"My title\"."
             (goto-char (cdr avoid))
           (let* ((level (- (match-end 1) (match-beginning 1)))
                  (text (buffer-substring (match-beginning 2) (match-end 2)))
+                 (source (unless (get-text-property markup-start
+                                                    'agent-shell-markdown-source)
+                           (agent-shell-markdown-reconstruct
+                            markup-start (match-end 2))))
                  ;; The trailing `\\n' we re-insert below would otherwise
                  ;; punch a hole in the caller's contiguous block range
                  ;; (eg. `invisible'/`agent-shell-ui-section') and break
@@ -576,10 +608,14 @@ with face `agent-shell-markdown-header-2' on \"My title\"."
             (insert text "\n")
             (when carried
               (add-text-properties markup-start (point) carried))
-            (add-face-text-property markup-start
-                                    (+ markup-start (length text))
-                                    (intern (format "agent-shell-markdown-header-%d"
-                                                    (min (max level 1) 6))))))))))
+            (let ((end (+ markup-start (length text))))
+              (add-face-text-property
+               markup-start end
+               (intern (format "agent-shell-markdown-header-%d"
+                               (min (max level 1) 6))))
+              (when source
+                (put-text-property markup-start end
+                                   'agent-shell-markdown-source source)))))))))
 
 (cl-defun agent-shell-markdown--style-inline-code (&key avoid-ranges)
   "Strip backticks from complete inline `X` spans and face the body.
@@ -603,7 +639,11 @@ face `agent-shell-markdown-inline-code' on \"code\"."
                      markup-start markup-end avoid-ranges)))
         (if avoid
             (goto-char (cdr avoid))
-          (let ((text (buffer-substring (match-beginning 1) (match-end 1))))
+          (let ((text (buffer-substring (match-beginning 1) (match-end 1)))
+                (source (unless (get-text-property markup-start
+                                                   'agent-shell-markdown-source)
+                          (agent-shell-markdown-reconstruct
+                           markup-start markup-end))))
             (delete-region markup-start markup-end)
             (goto-char markup-start)
             (insert text)
@@ -611,7 +651,10 @@ face `agent-shell-markdown-inline-code' on \"code\"."
               (add-face-text-property markup-start end 'agent-shell-markdown-inline-code)
               (add-text-properties markup-start end
                                    '(agent-shell-markdown-frozen t
-                                     rear-nonsticky (agent-shell-markdown-frozen))))))))))
+                                                                 rear-nonsticky (agent-shell-markdown-frozen)))
+              (when source
+                (put-text-property markup-start end
+                                   'agent-shell-markdown-source source)))))))))
 
 (cl-defun agent-shell-markdown--replace-links (&key avoid-ranges)
   "Replace `[title](url)' markup with title faced as link.
@@ -647,7 +690,11 @@ and a keymap that opens the URL."
          (t
           (let ((title (buffer-substring (match-beginning 1) (match-end 1)))
                 (url (buffer-substring-no-properties
-                      (match-beginning 2) (match-end 2))))
+                      (match-beginning 2) (match-end 2)))
+                (source (unless (get-text-property markup-start
+                                                   'agent-shell-markdown-source)
+                          (agent-shell-markdown-reconstruct
+                           markup-start markup-end))))
             (delete-region markup-start markup-end)
             (goto-char markup-start)
             (insert title)
@@ -657,7 +704,10 @@ and a keymap that opens the URL."
                                  (agent-shell-markdown--make-ret-binding-map
                                   (lambda () (interactive)
                                     (agent-shell-markdown--open-link url))))
-              (put-text-property markup-start end 'mouse-face 'highlight)))))))))
+              (put-text-property markup-start end 'mouse-face 'highlight)
+              (when source
+                (put-text-property markup-start end
+                                   'agent-shell-markdown-source source))))))))))
 
 (cl-defun agent-shell-markdown--replace-images (&key avoid-ranges image-cache-directory)
   "Replace `![alt](url)' image markup with displayed images.
@@ -944,6 +994,7 @@ with `emacs-lisp-mode' face properties on the body and a
                (body-end (copy-marker (match-end 4)))
                (close-start (match-beginning 5))
                (close-end (match-end 5))
+               (source (buffer-substring-no-properties open-start close-end))
                (highlighted (when highlight-blocks
                               (agent-shell-markdown--highlight-code
                                (buffer-substring-no-properties body-start body-end)
@@ -1069,14 +1120,26 @@ with `emacs-lisp-mode' face properties on the body and a
               ;; tinted line below the last body line.  body-end
               ;; (insertion-type nil) stays put across this insert; the
               ;; vpad lives at [body-end, body-end+1) within the buffer.
-              (save-excursion
-                (when (and (< (marker-position body-end) (point-max))
-                           (eq (char-after (marker-position body-end)) ?\n))
-                  (goto-char (1+ (marker-position body-end)))
-                  (let ((vpad-start (point)))
-                    (insert vpad-line)
-                    (when carried
-                      (add-text-properties vpad-start (point) carried)))))
+              (let ((panel-bottom (marker-position body-end)))
+                (save-excursion
+                  (when (and (< (marker-position body-end) (point-max))
+                             (eq (char-after (marker-position body-end)) ?\n))
+                    (goto-char (1+ (marker-position body-end)))
+                    (let ((vpad-start (point)))
+                      (insert vpad-line)
+                      (when carried
+                        (add-text-properties vpad-start (point) carried))
+                      (setq panel-bottom (point)))))
+                ;; The inserted panel chrome (language label, copy icon,
+                ;; padding) is not markdown, so give it an empty source: a
+                ;; selection that contains it reconstructs to nothing
+                ;; rather than leaking e.g. "python ⧉".  The body content
+                ;; carries the fenced source.
+                (put-text-property (marker-position body-start) panel-bottom
+                                   'agent-shell-markdown-source "")
+                (put-text-property (marker-position content-start)
+                                   (marker-position body-end)
+                                   'agent-shell-markdown-source source))
               ;; Move point past the body so the outer `re-search-forward'
               ;; loop doesn't backtrack into body content (e.g. shorter
               ;; inner fences inside a wider outer fence).
@@ -1857,18 +1920,23 @@ rendered region from inheriting either of our two properties."
       (add-text-properties
        table-start end
        `(agent-shell-markdown-frozen t
-         agent-shell-markdown-table-source ,source
-         rear-nonsticky (agent-shell-markdown-frozen
-                         agent-shell-markdown-table-source))))))
+                                     agent-shell-markdown-table-source ,source
+                                     ;; Mirror the source under the generic property that
+                                     ;; `agent-shell-copy-as-markdown' reads, so tables reconstruct
+                                     ;; the same way every other block does.
+                                     agent-shell-markdown-source ,source
+                                     rear-nonsticky (agent-shell-markdown-frozen
+                                                     agent-shell-markdown-table-source
+                                                     agent-shell-markdown-source))))))
 
 (defun agent-shell-markdown--carry-properties (pos)
   "Return a plist of properties at POS to carry across our delete+insert.
 
 Filters out properties our rendering itself sets (`face',
 `agent-shell-markdown-frozen', `agent-shell-markdown-table-source',
-`rear-nonsticky') so callers' application-level properties
-(read-only, agent-shell block ids, etc.) survive on the rendered
-output."
+`agent-shell-markdown-source', `rear-nonsticky') so callers'
+application-level properties (read-only, agent-shell block ids,
+etc.) survive on the rendered output."
   (let ((props (text-properties-at pos))
         (carried nil))
     (while props
@@ -1877,10 +1945,56 @@ output."
         (unless (memq key '(face
                             agent-shell-markdown-frozen
                             agent-shell-markdown-table-source
+                            agent-shell-markdown-source
                             rear-nonsticky))
           (setq carried (cons val (cons key carried))))
         (setq props (cddr props))))
     (nreverse carried)))
+
+(defun agent-shell-markdown-reconstruct (beg end)
+  "Return the text between BEG and END with the original markdown restored.
+
+Each rendered construct stashes the markdown for its span on the
+`agent-shell-markdown-source' text property.  A span fully contained
+in [BEG, END) contributes its stored source; a span whose source is
+empty (inserted chrome, e.g. a code-block's language label) always
+contributes nothing; other partially-selected and unrendered text
+contribute their visible buffer text verbatim.
+
+This is the reconstruction behind `agent-shell-copy-as-markdown'.
+The styling passes also call it (guarded, before deleting their
+markup) to capture a construct's own source: expanding the markup
+span in place lets the delimiters and un-rendered inner markup pass
+through verbatim, while any nested run a deeper construct already
+stashed is substituted with that construct's source (such runs are
+always fully inside the markup span, so the containment test holds)."
+  (let ((pos beg)
+        (parts '()))
+    (while (< pos end)
+      (let* ((source (get-text-property pos 'agent-shell-markdown-source))
+             (run-end (next-single-property-change
+                       pos 'agent-shell-markdown-source nil (point-max)))
+             (limit (min run-end end)))
+        (push
+         (cond
+          ;; Inserted chrome (empty source, e.g. a code-block label) is
+          ;; not markdown, so it vanishes whether wholly or partly
+          ;; selected.
+          ((equal source "") "")
+          ;; A stashed span contributes its source only when wholly inside
+          ;; [BEG, END).  Test the cheap bound before the backward scan.
+          ((and source
+                (<= run-end end)
+                (>= (previous-single-property-change
+                     (min (1+ pos) (point-max))
+                     'agent-shell-markdown-source nil (point-min))
+                    beg))
+           source)
+          ;; Plain text, or a partially-selected span: emit as shown.
+          (t (buffer-substring-no-properties pos limit)))
+         parts)
+        (setq pos limit)))
+    (apply #'concat (nreverse parts))))
 
 (cl-defun agent-shell-markdown--render-table-source (&key source window)
   "Render SOURCE (markdown table text) to a propertized string.
