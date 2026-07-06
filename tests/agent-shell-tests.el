@@ -1079,6 +1079,84 @@ it can be restored when the user returns to edit mode."
                    '((:old . "x\ny") (:new . ""))))
                  "-2")))
 
+(ert-deftest agent-shell--make-diff-infos-test ()
+  "Test `agent-shell--make-diff-infos' function."
+  ;; Test no diff content
+  (should (equal (agent-shell--make-diff-infos
+                  :acp-tool-call '((content . [((type . "text") (text . "hello"))])))
+                 nil))
+
+  ;; Test a single diff object in content
+  (should (equal (agent-shell--make-diff-infos
+                  :acp-tool-call '((content . ((type . "diff")
+                                               (oldText . "a")
+                                               (newText . "b")
+                                               (path . "foo.el")))))
+                 '(((:old . "a") (:new . "b") (:file . "foo.el")))))
+
+  ;; Test multiple diff items in a content vector (issue #580)
+  (should (equal (agent-shell--make-diff-infos
+                  :acp-tool-call '((content . [((type . "diff")
+                                                (oldText . "a1")
+                                                (newText . "b1")
+                                                (path . "one.el"))
+                                               ((type . "text")
+                                                (text . "ignore me"))
+                                               ((type . "diff")
+                                                (oldText . "a2")
+                                                (newText . "b2")
+                                                (path . "two.el"))])))
+                 '(((:old . "a1") (:new . "b1") (:file . "one.el"))
+                   ((:old . "a2") (:new . "b2") (:file . "two.el")))))
+
+  ;; Test oldText defaulting to "" for new files
+  (should (equal (agent-shell--make-diff-infos
+                  :acp-tool-call '((content . [((type . "diff")
+                                                (newText . "new")
+                                                (path . "created.el"))])))
+                 '(((:old . "") (:new . "new") (:file . "created.el"))))))
+
+(ert-deftest agent-shell--diffs-line-stats-test ()
+  "Test `agent-shell--diffs-line-stats' aggregates across diffs."
+  ;; Test nil input
+  (should (equal (agent-shell--diffs-line-stats nil) nil))
+
+  ;; Test counts are summed across every diff
+  (let ((stats (agent-shell--diffs-line-stats
+                '(((:old . "a\nb\nc") (:new . "a\nB\nc"))
+                  ((:old . "") (:new . "x\ny\nz"))))))
+    (should (equal (map-elt stats :added) 4))
+    (should (equal (map-elt stats :removed) 1))))
+
+(ert-deftest agent-shell--format-diffs-line-stats-test ()
+  "Test `agent-shell--format-diffs-line-stats' function."
+  ;; Test nil input
+  (should (equal (agent-shell--format-diffs-line-stats nil) nil))
+
+  ;; Test aggregated summary across diffs
+  (should (equal (substring-no-properties
+                  (agent-shell--format-diffs-line-stats
+                   '(((:old . "a\nb\nc") (:new . "a\nB\nc"))
+                     ((:old . "") (:new . "x\ny\nz")))))
+                 "+4 -1")))
+
+(ert-deftest agent-shell--format-diffs-as-text-test ()
+  "Test `agent-shell--format-diffs-as-text' function."
+  ;; Test nil input
+  (should (equal (agent-shell--format-diffs-as-text nil) nil))
+
+  ;; Test each diff is rendered under a header naming its file
+  (let ((result (substring-no-properties
+                 (agent-shell--format-diffs-as-text
+                  '(((:old . "a\n") (:new . "b\n") (:file . "one.el"))
+                    ((:old . "c\n") (:new . "d\n") (:file . "two.el")))))))
+    (should (string-match-p "one.el" result))
+    (should (string-match-p "two.el" result))
+    (should (string-match-p "^-a" result))
+    (should (string-match-p "^\\+b" result))
+    (should (string-match-p "^-c" result))
+    (should (string-match-p "^\\+d" result))))
+
 (ert-deftest agent-shell--format-agent-capabilities-test ()
   "Test `agent-shell--format-agent-capabilities' function."
   ;; Test with multiple capabilities (includes comma)

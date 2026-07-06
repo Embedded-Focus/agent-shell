@@ -2085,9 +2085,9 @@ pretty-printed JSON inside a json fence."
                           (cons :description (map-nested-elt acp-notification '(params update rawInput description)))
                           (cons :content (map-nested-elt acp-notification '(params update content)))
                           (cons :raw-input (map-nested-elt acp-notification '(params update rawInput))))
-                    (when-let* ((diff (agent-shell--make-diff-info
-                                       :acp-tool-call (map-nested-elt acp-notification '(params update)))))
-                      (list (cons :diff diff)))))
+                    (when-let* ((diffs (agent-shell--make-diff-infos
+                                        :acp-tool-call (map-nested-elt acp-notification '(params update)))))
+                      (list (cons :diffs diffs)))))
            (agent-shell--cancel-idle-timer)
            (agent-shell--emit-event
             :event 'tool-call-update
@@ -2217,9 +2217,9 @@ pretty-printed JSON inside a json fence."
                       (list (cons :raw-input raw-input)))
                     (when-let* ((locations (map-nested-elt acp-notification '(params update locations))))
                       (list (cons :locations locations)))
-                    (when-let* ((diff (agent-shell--make-diff-info
-                                       :acp-tool-call (map-nested-elt acp-notification '(params update)))))
-                      (list (cons :diff diff)))))
+                    (when-let* ((diffs (agent-shell--make-diff-infos
+                                        :acp-tool-call (map-nested-elt acp-notification '(params update)))))
+                      (list (cons :diffs diffs)))))
            ;; OpenCode sends tool_call_update with the populated rawInput
            ;; after session/request_permission, so an open permission
            ;; dialog needs a re-render to surface the arguments.
@@ -2243,7 +2243,7 @@ pretty-printed JSON inside a json fence."
             :event 'tool-call-update
             :data (list (cons :tool-call-id (map-nested-elt acp-notification '(params update toolCallId)))
                         (cons :tool-call (map-nested-elt state `(:tool-calls ,(map-nested-elt acp-notification '(params update toolCallId)))))))
-           (let* ((diff (map-nested-elt state `(:tool-calls ,(map-nested-elt acp-notification '(params update toolCallId)) :diff)))
+           (let* ((diffs (map-nested-elt state `(:tool-calls ,(map-nested-elt acp-notification '(params update toolCallId)) :diffs)))
                   (output (concat
                            "\n\n"
                            (mapconcat #'agent-shell--content-block-to-markdown
@@ -2251,13 +2251,9 @@ pretty-printed JSON inside a json fence."
                                                 (map-nested-elt acp-notification '(params update content)))
                                       "\n\n")
                            "\n\n"))
-                  (diff-text (agent-shell--format-diff-as-text diff))
+                  (diff-text (agent-shell--format-diffs-as-text diffs))
                   (body-text (if diff-text
-                                 (concat output
-                                         "\n\n"
-                                         "╭─────────╮\n"
-                                         "│ changes │\n"
-                                         "╰─────────╯\n\n" diff-text)
+                                 (concat output "\n\n" diff-text)
                                output)))
              ;; Log tool call to transcript when completed or failed
              (when (and (map-nested-elt acp-notification '(params update status))
@@ -2405,9 +2401,9 @@ pretty-printed JSON inside a json fence."
                     (list (cons :content content)))
                   (when-let* ((locations (map-nested-elt acp-request '(params toolCall locations))))
                     (list (cons :locations locations)))
-                  (when-let* ((diff (agent-shell--make-diff-info
-                                     :acp-tool-call (map-nested-elt acp-request '(params toolCall)))))
-                    (list (cons :diff diff)))))
+                  (when-let* ((diffs (agent-shell--make-diff-infos
+                                      :acp-tool-call (map-nested-elt acp-request '(params toolCall)))))
+                    (list (cons :diffs diffs)))))
          (let* ((tool-call-id (map-nested-elt acp-request '(params toolCall toolCallId)))
                 (permission-handled
                  (and (functionp agent-shell-permission-responder-function)
@@ -2754,11 +2750,15 @@ Example output:
                                'font-lock-face 'font-lock-comment-face))))
      :joiner "\n")))
 
-(cl-defun agent-shell--make-diff-info (&key acp-tool-call)
-  "Make diff information from ACP-TOOL-CALL.
+(cl-defun agent-shell--make-diff-infos (&key acp-tool-call)
+  "Make a list of diff infos from ACP-TOOL-CALL.
 
 ACP-TOOL-CALL is an ACP tool call object that may contain diff info in
 either `content' (standard ACP format) or `rawInput' (eg.  Copilot).
+
+A single tool call may carry more than one diff (eg.  Codex editing
+several files in one turn), so this returns a list with one entry per
+diff.  See https://github.com/xenodium/agent-shell/issues/580
 
 Standard ACP format uses content with type \"diff\" containing
 oldText/newText/path fields.
@@ -2769,53 +2769,52 @@ Copilot sends old_str/new_str/path in rawInput instead.
 
 See https://github.com/xenodium/agent-shell/issues/217
 
-Returns in the form:
+Returns a list of alists, each in the form:
 
  `((:old . old-text)
    (:new . new-text)
    (:file . file-path))."
-  (let ((content (map-elt acp-tool-call 'content))
-        (raw-input (map-elt acp-tool-call 'rawInput)))
-    (when-let* ((diff-item (cond
-                            ;; Single diff object
-                            ((and content (equal (map-elt content 'type) "diff"))
-                             content)
-                            ;; TODO: Is this needed?
-                            ;; Isn't content always an alist?
-                            ;; Vector/array content - find diff item
-                            ((vectorp content)
-                             (seq-find (lambda (item)
-                                         (equal (map-elt item 'type) "diff"))
-                                       content))
-                            ;; TODO: Is this needed?
-                            ;; Isn't content always an alist?
-                            ;; List content - find diff item
-                            ((and content (listp content))
-                             (seq-find (lambda (item)
-                                         (equal (map-elt item 'type) "diff"))
-                                       content))
-                            ;; Attempt to get from rawInput.
-                            ((and raw-input (map-elt raw-input 'new_str))
-                             `((oldText . ,(or (map-elt raw-input 'old_str) ""))
-                               (newText . ,(map-elt raw-input 'new_str))
-                               (path . ,(map-elt raw-input 'path))))
-                            ;; Attempt diff from rawInput (eg. Copilot).
-                            ((and raw-input (map-elt raw-input 'diff))
-                             (let ((parsed (agent-shell--parse-unified-diff
-                                            (map-elt raw-input 'diff))))
-                               `((oldText . ,(car parsed))
-                                 (newText . ,(cdr parsed))
-                                 (path . ,(or (map-elt raw-input 'fileName)
-                                              (map-elt raw-input 'path))))))))
-                ;; oldText can be nil for Write tools creating new files, default to ""
-                ;; TODO: Currently don't have a way to capture overwrites
-                (old-text (or (map-elt diff-item 'oldText) ""))
-                (new-text (map-elt diff-item 'newText))
-                (file-path (map-elt diff-item 'path)))
-      (append (list (cons :old old-text)
-                    (cons :new new-text))
-              (when file-path
-                (list (cons :file file-path)))))))
+  (let* ((content (map-elt acp-tool-call 'content))
+         (raw-input (map-elt acp-tool-call 'rawInput))
+         (diff-items
+          (cond
+           ;; Single diff object
+           ((and content (equal (map-elt content 'type) "diff"))
+            (list content))
+           ;; Vector/array content - collect all diff items
+           ((vectorp content)
+            (seq-filter (lambda (item)
+                          (equal (map-elt item 'type) "diff"))
+                        content))
+           ;; List content - collect all diff items
+           ((and content (listp content))
+            (seq-filter (lambda (item)
+                          (equal (map-elt item 'type) "diff"))
+                        content))
+           ;; Attempt to get from rawInput.
+           ((and raw-input (map-elt raw-input 'new_str))
+            (list `((oldText . ,(or (map-elt raw-input 'old_str) ""))
+                    (newText . ,(map-elt raw-input 'new_str))
+                    (path . ,(map-elt raw-input 'path)))))
+           ;; Attempt diff from rawInput (eg. Copilot).
+           ((and raw-input (map-elt raw-input 'diff))
+            (let ((parsed (agent-shell--parse-unified-diff
+                           (map-elt raw-input 'diff))))
+              (list `((oldText . ,(car parsed))
+                      (newText . ,(cdr parsed))
+                      (path . ,(or (map-elt raw-input 'fileName)
+                                   (map-elt raw-input 'path))))))))))
+    (seq-keep
+     (lambda (diff-item)
+       (when-let* ((new-text (map-elt diff-item 'newText))
+                   (file-path (map-elt diff-item 'path)))
+         ;; oldText can be nil for Write tools creating new files, default
+         ;; to "".
+         ;; TODO: Currently don't have a way to capture overwrites
+         (list (cons :old (or (map-elt diff-item 'oldText) ""))
+               (cons :new new-text)
+               (cons :file file-path))))
+     diff-items)))
 
 ;; Based on https://github.com/editor-code-assistant/eca-emacs/blob/298849d1aae3241bf8828b6558c6deb45d75a3c8/eca-diff.el#L22
 (defun agent-shell--parse-unified-diff (diff-string)
@@ -2839,7 +2838,7 @@ Returns a cons cell (OLD-TEXT . NEW-TEXT)."
 (defun agent-shell--format-diff-as-text (diff)
   "Format DIFF info as text suitable for display in tool call body.
 
-DIFF should be in the form returned by `agent-shell--make-diff-info':
+DIFF should be a single entry as returned by `agent-shell--make-diff-infos':
   ((:old . old-text) (:new . new-text) (:file . file-path))"
   (when-let* (diff
               (old-file (make-temp-file "old"))
@@ -2886,10 +2885,42 @@ DIFF should be in the form returned by `agent-shell--make-diff-info':
       (delete-file old-file)
       (delete-file new-file))))
 
+(defun agent-shell--diff-box (label)
+  "Return a boxed LABEL header string like the tool call changes header.
+
+For example, LABEL \"changes\" returns:
+
+  ╭─────────╮
+  │ changes │
+  ╰─────────╯"
+  (let* ((text (concat " " label " "))
+         (line (make-string (length text) ?─)))
+    (concat "╭" line "╮\n"
+            "│" text "│\n"
+            "╰" line "╯")))
+
+(defun agent-shell--format-diffs-as-text (diffs)
+  "Format DIFFS as text suitable for display in the tool call body.
+
+DIFFS is a list of diff infos as returned by
+`agent-shell--make-diff-infos'.  Each diff is rendered beneath a boxed
+header naming its file (or \"changes\" when the file is unknown)."
+  (when-let* ((sections
+               (seq-keep
+                (lambda (diff)
+                  (when-let* ((text (agent-shell--format-diff-as-text diff)))
+                    (concat (agent-shell--diff-box
+                             (if-let* ((file (map-elt diff :file)))
+                                 (agent-shell--shorten-paths file)
+                               "changes"))
+                            "\n\n" text)))
+                diffs)))
+    (string-join sections "\n\n")))
+
 (defun agent-shell--diff-line-stats (diff)
   "Return added/removed line counts for DIFF, or nil.
 
-DIFF is in the form returned by `agent-shell--make-diff-info'.
+DIFF is a single entry as returned by `agent-shell--make-diff-infos'.
 Counts come from a unified diff between the old and new text, so
 they reflect actual added and removed lines rather than net
 line-count change.
@@ -2923,18 +2954,35 @@ returns:
       (delete-file old-file)
       (delete-file new-file))))
 
-(defun agent-shell--format-diff-line-stats (diff)
-  "Return a propertized \"+N -M\" summary for DIFF, or nil.
+(defun agent-shell--diffs-line-stats (diffs)
+  "Return added/removed line counts aggregated across DIFFS, or nil.
 
-DIFF is in the form returned by `agent-shell--make-diff-info'.
-The added count is faced with `diff-added' and the removed count
-with `diff-removed'.  Returns nil when DIFF has no added or
-removed lines.
+DIFFS is a list of diff infos as returned by
+`agent-shell--make-diff-infos'.  Counts are summed across every diff.
 
-For example, a diff that adds 23 lines and removes 5 returns the
+Returns nil when DIFFS is empty, otherwise:
+
+  ((:added . total-added) (:removed . total-removed))"
+  (when diffs
+    (let ((added 0) (removed 0))
+      (dolist (diff diffs)
+        (when-let* ((stats (agent-shell--diff-line-stats diff)))
+          (setq added (+ added (map-elt stats :added)))
+          (setq removed (+ removed (map-elt stats :removed)))))
+      (list (cons :added added)
+            (cons :removed removed)))))
+
+(defun agent-shell--format-line-stats (stats)
+  "Return a propertized \"+N -M\" summary for STATS, or nil.
+
+STATS is in the form ((:added . N) (:removed . M)).  The added
+count is faced with `diff-added' and the removed count with
+`diff-removed'.  Returns nil when there are no added or removed
+lines.
+
+For example, STATS adding 23 lines and removing 5 returns the
 string \"+23 -5\"."
-  (when-let* ((stats (agent-shell--diff-line-stats diff))
-              (added (map-elt stats :added))
+  (when-let* ((added (map-elt stats :added))
               (removed (map-elt stats :removed))
               ((or (> added 0) (> removed 0))))
     (string-join
@@ -2944,6 +2992,19 @@ string \"+23 -5\"."
                  (when (> removed 0)
                    (propertize (format "-%d" removed) 'font-lock-face 'diff-removed))))
      " ")))
+
+(defun agent-shell--format-diff-line-stats (diff)
+  "Return a propertized \"+N -M\" summary for DIFF, or nil.
+
+DIFF is in the form returned by `agent-shell--make-diff-infos'."
+  (agent-shell--format-line-stats (agent-shell--diff-line-stats diff)))
+
+(defun agent-shell--format-diffs-line-stats (diffs)
+  "Return a propertized \"+N -M\" summary aggregated across DIFFS, or nil.
+
+DIFFS is a list of diff infos as returned by
+`agent-shell--make-diff-infos'."
+  (agent-shell--format-line-stats (agent-shell--diffs-line-stats diffs)))
 
 (cl-defun agent-shell--make-error-handler (&key state shell-buffer)
   "Create ACP error handler with SHELL-BUFFER STATE."
@@ -3287,7 +3348,7 @@ Returns propertized labels in :status and :title propertized."
                             (when (equal (map-elt tool-call :kind) "execute")
                               (seq-first (split-string (or (map-elt tool-call :title) "") "\n")))))
            ;; Append a "+N -M" diff summary to edit titles.
-           (stats (agent-shell--format-diff-line-stats (map-elt tool-call :diff)))
+           (stats (agent-shell--format-diffs-line-stats (map-elt tool-call :diffs)))
            (label (cond ((and title description
                               (not (equal (string-remove-prefix "`" (string-remove-suffix "`" (string-trim title)))
                                           (string-remove-prefix "`" (string-remove-suffix "`" (string-trim description))))))
@@ -7120,9 +7181,9 @@ For example:
                                        (with-current-buffer shell-buffer
                                          (agent-shell-interrupt t)))))))
                    ;; Add diff keybinding if diff info is available
-                   (when (map-elt tool-call :diff)
+                   (when (map-elt tool-call :diffs)
                      (define-key map "v" (agent-shell--make-diff-viewing-function
-                                          :diff (map-elt tool-call :diff)
+                                          :diffs (map-elt tool-call :diffs)
                                           :actions actions
                                           :client client
                                           :request-id (map-elt tool-call :permission-request-id)
@@ -7136,12 +7197,12 @@ For example:
                                    (agent-shell-interrupt t))))
                    map))
          (title (agent-shell--permission-title :tool-call tool-call))
-         (diff-button (when (map-elt tool-call :diff)
+         (diff-button (when (map-elt tool-call :diffs)
                         (agent-shell--make-permission-button
                          :text "View (v)"
                          :help "Press v to view diff"
                          :action (agent-shell--make-diff-viewing-function
-                                  :diff (map-elt tool-call :diff)
+                                  :diffs (map-elt tool-call :diffs)
                                   :actions actions
                                   :client client
                                   :request-id (map-elt tool-call :permission-request-id)
@@ -7275,10 +7336,21 @@ Returns the matching action or nil if no match found."
               actions))
    (t nil)))
 
-(cl-defun agent-shell--make-diff-viewing-function (&key diff actions client request-id state tool-call-id)
+(defun agent-shell--diffs-title (diffs)
+  "Return a header-line title for DIFFS.
+
+Returns the file name when DIFFS has a single entry, or a \"N files\"
+summary when it has several."
+  (cond ((null diffs) nil)
+        ((= (length diffs) 1)
+         (when-let* ((file (map-elt (car diffs) :file)))
+           (file-name-nondirectory file)))
+        (t (format "%d files" (length diffs)))))
+
+(cl-defun agent-shell--make-diff-viewing-function (&key diffs actions client request-id state tool-call-id)
   "Create a diffing handler for the ACP CLIENT's REQUEST-ID and TOOL-CALL-ID.
 
-DIFF as per `agent-shell--make-diff-info'.
+DIFFS as per `agent-shell--make-diff-infos'.
 ACTIONS as per `agent-shell--make-permission-action'."
   (unless (derived-mode-p 'agent-shell-mode)
     (error "Not in a shell"))
@@ -7292,10 +7364,8 @@ ACTIONS as per `agent-shell--make-permission-action'."
                                      display-buffer-same-window)))
         (let ((diff-buffer
                (agent-shell-diff
-                :old (map-elt diff :old)
-                :new (map-elt diff :new)
-                :file (map-elt diff :file)
-                :title (file-name-nondirectory (map-elt diff :file))
+                :diffs diffs
+                :title (agent-shell--diffs-title diffs)
                 :on-accept (lambda ()
                              (interactive)
                              (let ((action (agent-shell--resolve-permission-choice-to-action

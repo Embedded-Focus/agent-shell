@@ -98,25 +98,32 @@ If BUFFER is not live, do nothing."
               (kill-buffer buf)))))
     (user-error "No reject command available in this buffer")))
 
-(cl-defun agent-shell-diff (&key old new on-exit on-accept on-reject title file)
-  "Display a diff between OLD and NEW strings in a buffer.
+(cl-defun agent-shell-diff (&key diffs on-exit on-accept on-reject title)
+  "Display one or more diffs in a buffer.
 
-Creates a new buffer showing the differences between OLD and NEW
-using `agent-shell-diff-mode'.  The buffer is read-only.
+Creates a new buffer showing the differences using
+`agent-shell-diff-mode'.  The buffer is read-only.
+
+DIFFS is a list of alists, each with :old, :new and :file keys, as
+returned by `agent-shell--make-diff-infos'.  A single diff is passed as
+a one-element list.  When DIFFS holds more than one file, each is shown
+as its own section preceded by a header naming the file.
 
 When the buffer is killed, calls ON-EXIT with no arguments.
 
 Returns the newly created diff buffer.
 
 Arguments:
-  :OLD       - Original string content
-  :NEW       - Modified string content
+  :DIFFS     - List of ((:old . _) (:new . _) (:file . _)) alists
   :ON-EXIT   - Function called with no arguments when buffer is killed
   :ON-ACCEPT - Command to accept all changes
   :ON-REJECT - Command to reject all changes
-  :TITLE     - Optional title to display in header line
-  :FILE      - File path"
-  (let* ((diff-buffer (generate-new-buffer "*agent-shell-diff*"))
+  :TITLE     - Optional title to display in header line"
+  (let* ((first-file (map-elt (car diffs) :file))
+         (title (or title
+                    (when (and first-file (not (cdr diffs)))
+                      (file-name-nondirectory first-file))))
+         (diff-buffer (generate-new-buffer "*agent-shell-diff*"))
          (calling-window (selected-window))
          (calling-buffer (current-buffer))
          (interrupt-key (where-is-internal 'agent-shell-interrupt
@@ -130,15 +137,9 @@ Arguments:
               ;; Set mode before inserting diff so diff-no-select
               ;; doesn't reset font-lock (see #316).
               (agent-shell-diff-mode)
-              (agent-shell-diff--insert-diff old new file diff-buffer)
+              (agent-shell-diff--insert-diffs diffs diff-buffer)
               ;; Add overlays to hide scary text.
               (save-excursion
-                (goto-char (point-min))
-                ;; Remove command added by diff-no-select
-                (delete-region (point) (progn (forward-line 1) (point)))
-                ;; Remove "Diff finished." added by diff-no-select
-                (delete-region (progn (goto-char (point-max)) (forward-line -1) (forward-line 0) (point))
-                               (point-max))
                 (goto-char (point-min))
                 ;; Hide --- and +++ lines
                 (while (re-search-forward "^\\(---\\|\\+\\+\\+\\).*\n" nil t)
@@ -165,7 +166,7 @@ Arguments:
                     (overlay-put overlay 'evaporate t)))))
             (goto-char (point-min))
             (ignore-errors (diff-hunk-next))
-            (setq agent-shell-diff--file file
+            (setq agent-shell-diff--file first-file
                   agent-shell-diff--accept-all-command on-accept
                   agent-shell-diff--reject-all-command on-reject)
             (when on-exit
@@ -206,20 +207,70 @@ Arguments:
                                     display-buffer-same-window))))))
 
 (defun agent-shell-diff-open-file ()
-  "Open the file associated with the current diff buffer."
+  "Open the file associated with the diff section under point.
+
+Falls back to the buffer's first file when point is not within a
+tagged section."
   (interactive)
-  (if agent-shell-diff--file
-      (find-file agent-shell-diff--file)
+  (if-let* ((file (or (get-text-property (point) 'agent-shell-diff-file)
+                      agent-shell-diff--file)))
+      (find-file file)
     (user-error "No file associated with this diff buffer")))
 
-(defun agent-shell-diff--insert-diff (old new file buf)
-  "Insert diff from FILE between OLD and NEW strings in buffer BUF."
-  (let* ((suffix (format ".%s" (file-name-extension file)))
+(defun agent-shell-diff--insert-diffs (diffs buf)
+  "Insert DIFFS into buffer BUF, one file section each.
+
+DIFFS is a list of alists with :old, :new and :file keys.  When DIFFS
+holds more than one entry, each section is preceded by a header naming
+the file.  Each section is tagged with an `agent-shell-diff-file' text
+property so `agent-shell-diff-open-file' can open the file under point."
+  (let ((multiple (cdr diffs)))
+    (with-current-buffer buf
+      (dolist (diff diffs)
+        (unless (bobp)
+          (insert "\n"))
+        (let ((section-start (point))
+              (file (map-elt diff :file)))
+          (when multiple
+            (insert (propertize (concat (or file "changes") "\n")
+                                'face 'diff-file-header)))
+          (insert (agent-shell-diff--diff-section-string
+                   (or (map-elt diff :old) "")
+                   (or (map-elt diff :new) "")
+                   file))
+          (when file
+            (put-text-property section-start (point)
+                               'agent-shell-diff-file file)))))))
+
+(defun agent-shell-diff--diff-section-string (old new file)
+  "Return a cleaned diff between OLD and NEW for FILE.
+
+FILE is only used to derive a temp-file suffix so `diff' picks a
+sensible mode; it may be nil.  The leading command line and trailing
+\"Diff finished.\" line that `diff-no-select' adds are removed."
+  (let* ((extension (and file (file-name-extension file)))
+         (suffix (and extension (format ".%s" extension)))
          (old-file (make-temp-file "old" nil suffix))
          (new-file (make-temp-file "new" nil suffix)))
-    (with-temp-file old-file (insert old))
-    (with-temp-file new-file (insert new))
-    (diff-no-select old-file new-file "-U3" t buf)))
+    (unwind-protect
+        (progn
+          (with-temp-file old-file (insert old))
+          (with-temp-file new-file (insert new))
+          (with-temp-buffer
+            (diff-no-select old-file new-file "-U3" t (current-buffer))
+            (let ((inhibit-read-only t))
+              ;; Remove command added by diff-no-select
+              (goto-char (point-min))
+              (delete-region (point) (progn (forward-line 1) (point)))
+              ;; Remove "Diff finished." added by diff-no-select
+              (delete-region (progn (goto-char (point-max))
+                                    (forward-line -1)
+                                    (forward-line 0)
+                                    (point))
+                             (point-max)))
+            (buffer-string)))
+      (delete-file old-file)
+      (delete-file new-file))))
 
 (provide 'agent-shell-diff)
 

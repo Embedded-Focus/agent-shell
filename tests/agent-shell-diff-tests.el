@@ -8,9 +8,9 @@
 (ert-deftest agent-shell-diff-returns-buffer-test ()
   "Test that `agent-shell-diff' returns the newly created diff buffer."
   (let ((buf (agent-shell-diff
-              :old "hello\n"
-              :new "world\n"
-              :file "test.el")))
+              :diffs (list (list (cons :old "hello\n")
+                                 (cons :new "world\n")
+                                 (cons :file "test.el"))))))
     (unwind-protect
         (progn
           (should (bufferp buf))
@@ -24,9 +24,9 @@
   "Test that ON-EXIT callback fires when the diff buffer is killed."
   (let* ((on-exit-called nil)
          (buf (agent-shell-diff
-               :old "hello\n"
-               :new "world\n"
-               :file "test.el"
+               :diffs (list (list (cons :old "hello\n")
+                                  (cons :new "world\n")
+                                  (cons :file "test.el")))
                :on-exit (lambda () (setq on-exit-called t)))))
     (unwind-protect
         (progn
@@ -40,9 +40,9 @@
   "Test that `agent-shell-diff-kill-buffer' kills without calling ON-EXIT."
   (let* ((on-exit-called nil)
          (buf (agent-shell-diff
-               :old "hello\n"
-               :new "world\n"
-               :file "test.el"
+               :diffs (list (list (cons :old "hello\n")
+                                  (cons :new "world\n")
+                                  (cons :file "test.el")))
                :on-exit (lambda () (setq on-exit-called t)))))
     (unwind-protect
         (progn
@@ -71,9 +71,9 @@
         (calling-buf (generate-new-buffer " *test-calling*")))
     (let ((buf (with-current-buffer calling-buf
                  (agent-shell-diff
-                  :old "hello\n"
-                  :new "world\n"
-                  :file "test.el"
+                  :diffs (list (list (cons :old "hello\n")
+                                     (cons :new "world\n")
+                                     (cons :file "test.el")))
                   :on-exit (lambda () (setq on-exit-called t))))))
       (unwind-protect
           (progn
@@ -103,7 +103,7 @@
          (view-fn (with-current-buffer shell-buf
                     (setq major-mode 'agent-shell-mode)
                     (agent-shell--make-diff-viewing-function
-                     :diff diff
+                     :diffs (list diff)
                      :actions nil
                      :client nil
                      :request-id "req-1"
@@ -132,7 +132,7 @@
          (view-fn (with-current-buffer shell-buf
                     (setq major-mode 'agent-shell-mode)
                     (agent-shell--make-diff-viewing-function
-                     :diff diff
+                     :diffs (list diff)
                      :actions nil
                      :client nil
                      :request-id "req-1"
@@ -154,9 +154,9 @@
 (ert-deftest agent-shell-diff-killed-on-permission-response-test ()
   "Test that `agent-shell--send-permission-response' kills a tracked diff buffer."
   (let* ((diff-buf (agent-shell-diff
-                    :old "hello\n"
-                    :new "world\n"
-                    :file "test.el"))
+                    :diffs (list (list (cons :old "hello\n")
+                                       (cons :new "world\n")
+                                       (cons :file "test.el")))))
          (shell-buf (generate-new-buffer " *test-shell*"))
          (tool-data (list (cons :status "pending")
                           (cons :diff-buffer diff-buf)))
@@ -189,9 +189,9 @@
 (ert-deftest agent-shell-diff-killed-on-shell-clean-up-test ()
   "Test that `agent-shell--clean-up' kills tracked diff buffers."
   (let* ((diff-buf (agent-shell-diff
-                    :old "hello\n"
-                    :new "world\n"
-                    :file "test.el"))
+                    :diffs (list (list (cons :old "hello\n")
+                                       (cons :new "world\n")
+                                       (cons :file "test.el")))))
          (shell-buf (generate-new-buffer " *test-shell*"))
          (tool-data (list (cons :status "pending")
                           (cons :diff-buffer diff-buf)))
