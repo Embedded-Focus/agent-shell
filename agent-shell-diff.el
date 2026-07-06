@@ -207,23 +207,184 @@ Arguments:
                                     display-buffer-same-window))))))
 
 (defun agent-shell-diff-open-file ()
-  "Open the file associated with the diff section under point.
+  "Open the file for the diff at point and jump to the change.
 
-Falls back to the buffer's first file when point is not within a
-tagged section."
+The diff's oldText/newText are often just a fragment of the file (eg.
+Codex sends the edited region), so the hunk's line numbers are relative
+to that fragment, not the file.  Rather than trust them, this searches
+the file for the changed content.  When ACP reports a `locations' line
+for the change, it is used to disambiguate duplicate matches.
+
+Uses the hunk at point, or the nearest one below, else above.  When
+point sits on a body line, lands on that line's content.  Searches for
+the old-side text first (the change has usually not been applied yet),
+then the new-side text.
+
+See https://github.com/xenodium/agent-shell/issues/347"
   (interactive)
-  (if-let* ((file (or (get-text-property (point) 'agent-shell-diff-file)
-                      agent-shell-diff--file)))
-      (find-file file)
-    (user-error "No file associated with this diff buffer")))
+  (let ((target (agent-shell-diff--target-at-point)))
+    (unless (map-elt target :file)
+      (user-error "No file associated with this diff buffer"))
+    (find-file (map-elt target :file))
+    (agent-shell-diff--jump-to-anchor
+     :old-block (map-elt target :old-block)
+     :new-block (map-elt target :new-block)
+     :offset (map-elt target :offset)
+     :hint-line (map-elt target :hint-line))))
+
+(cl-defun agent-shell-diff--jump-to-anchor (&key old-block new-block offset hint-line)
+  "Move point in the current buffer to a change described by anchors.
+
+Searches for OLD-BLOCK (the old-side text of the change), falling back to
+NEW-BLOCK (the new-side text) when the change is already applied.  Once a
+block matches, moves OFFSET lines into it.
+
+HINT-LINE, when non-nil, is the ACP-reported line of the change; it is
+used to pick between duplicate matches.  Leaves point at the top when
+neither block is found or both are empty."
+  (if-let* ((position (or (agent-shell-diff--search-block old-block hint-line)
+                          (agent-shell-diff--search-block new-block hint-line))))
+      (progn
+        (goto-char position)
+        (forward-line offset))
+    (goto-char (point-min)))
+  (recenter))
+
+(defun agent-shell-diff--search-block (block hint-line)
+  "Return the start position of the best match of BLOCK, or nil.
+
+Collects every occurrence of BLOCK in the current buffer.  With HINT-LINE
+non-nil, returns the occurrence whose line is closest to it; otherwise the
+first.  Returns nil when BLOCK is nil, empty, or absent."
+  (when (and block (not (string-empty-p block)))
+    (save-excursion
+      (goto-char (point-min))
+      (let (positions)
+        (while (search-forward block nil t)
+          (push (match-beginning 0) positions)
+          (goto-char (1+ (match-beginning 0))))
+        (setq positions (nreverse positions))
+        (if (and hint-line (cdr positions))
+            (car (seq-sort-by (lambda (position)
+                                (abs (- (line-number-at-pos position) hint-line)))
+                              #'< positions))
+          (car positions))))))
+
+(defun agent-shell-diff--target-at-point ()
+  "Return the file and change anchors for the diff at or nearest point.
+
+Returns an alist:
+
+  ((:file . file-path)
+   (:old-block . old-side-text)
+   (:new-block . new-side-text)
+   (:offset . line-offset)
+   (:hint-line . acp-reported-line))
+
+The blocks are the old-side and new-side text of the relevant hunk, to
+be searched for in the file.  :OFFSET is how many lines into a matched
+block to land on.  :HINT-LINE is the ACP `locations' line, when present,
+used to disambiguate duplicate matches.  Uses the hunk at point, or the
+nearest below, else above.  When point is on a body line, :OFFSET targets
+that line; otherwise it targets the hunk's first change."
+  (save-excursion
+    (if-let* ((header (agent-shell-diff--hunk-header-at-point)))
+        (append (list (cons :file (get-text-property header 'agent-shell-diff-file))
+                      (cons :hint-line (get-text-property header 'agent-shell-diff-line)))
+                (agent-shell-diff--hunk-anchor
+                 header
+                 ;; Point on the hunk header itself is not on a particular
+                 ;; change, so target the hunk's first change instead.
+                 (unless (= header (line-beginning-position))
+                   (line-beginning-position))))
+      (if-let* ((near (or (save-excursion
+                            (when (re-search-forward "^@@" nil t)
+                              (line-beginning-position)))
+                          (save-excursion
+                            (when (re-search-backward "^@@" nil t)
+                              (line-beginning-position))))))
+          (append (list (cons :file (get-text-property near 'agent-shell-diff-file))
+                        (cons :hint-line (get-text-property near 'agent-shell-diff-line)))
+                  (agent-shell-diff--hunk-anchor near nil))
+        (list (cons :file agent-shell-diff--file)
+              (cons :old-block nil)
+              (cons :new-block nil)
+              (cons :offset 0)
+              (cons :hint-line nil))))))
+
+(defun agent-shell-diff--hunk-header-at-point ()
+  "Return the position of the hunk header enclosing point, or nil.
+
+Walks up from point's line through diff body lines until it reaches a
+hunk header, stopping (with nil) at any non-diff line."
+  (save-excursion
+    (beginning-of-line)
+    (catch 'result
+      (while t
+        (cond
+         ((looking-at "^@@")
+          (throw 'result (point)))
+         ((memq (char-after) '(?\s ?- ?+ ?\\))
+          (unless (zerop (forward-line -1))
+            (throw 'result nil)))
+         (t
+          (throw 'result nil)))))))
+
+(defun agent-shell-diff--hunk-anchor (header-pos target-pos)
+  "Return change anchors for the hunk at HEADER-POS.
+
+TARGET-POS, when non-nil, is the position of a body line to land on;
+otherwise the hunk's first change is used.  Returns an alist:
+
+  ((:old-block . old-side-text)
+   (:new-block . new-side-text)
+   (:offset . line-offset))
+
+The blocks are the hunk's old-side and new-side text (context plus
+removed, and context plus added, respectively).  :OFFSET is the old-side
+line index to move to within a matched block."
+  (save-excursion
+    (goto-char header-pos)
+    (forward-line 1)
+    (let ((old-lines nil) (new-lines nil) (seen 0) (offset nil) (first-change nil))
+      (while (and (not (eobp))
+                  (memq (char-after) '(?\s ?- ?+ ?\\)))
+        (let ((char (char-after))
+              (text (buffer-substring-no-properties
+                     (1+ (line-beginning-position)) (line-end-position)))
+              (at-target (and target-pos (= (line-beginning-position) target-pos))))
+          (cond
+           ;; "\ No newline at end of file" marker; not file content.
+           ((eq char ?\\))
+           ((eq char ?\s)
+            (when at-target (setq offset seen))
+            (push text old-lines)
+            (push text new-lines)
+            (setq seen (1+ seen)))
+           ((eq char ?-)
+            (when at-target (setq offset seen))
+            (unless first-change (setq first-change seen))
+            (push text old-lines)
+            (setq seen (1+ seen)))
+           ((eq char ?+)
+            (when at-target (setq offset seen))
+            (unless first-change (setq first-change seen))
+            (push text new-lines))))
+        (forward-line 1))
+      (list (cons :old-block (when old-lines
+                               (string-join (nreverse old-lines) "\n")))
+            (cons :new-block (when new-lines
+                               (string-join (nreverse new-lines) "\n")))
+            (cons :offset (or offset first-change 0))))))
 
 (defun agent-shell-diff--insert-diffs (diffs buf)
   "Insert DIFFS into buffer BUF, one file section each.
 
-DIFFS is a list of alists with :old, :new and :file keys.  When DIFFS
-holds more than one entry, each section is preceded by a header naming
-the file.  Each section is tagged with an `agent-shell-diff-file' text
-property so `agent-shell-diff-open-file' can open the file under point."
+DIFFS is a list of alists with :old, :new, :file and optional :line
+keys.  When DIFFS holds more than one entry, each section is preceded by
+a header naming the file.  Each section is tagged with
+`agent-shell-diff-file' and, when present, `agent-shell-diff-line' text
+properties so `agent-shell-diff-open-file' can locate the change."
   (let ((multiple (cdr diffs)))
     (with-current-buffer buf
       (dolist (diff diffs)
@@ -240,7 +401,10 @@ property so `agent-shell-diff-open-file' can open the file under point."
                    file))
           (when file
             (put-text-property section-start (point)
-                               'agent-shell-diff-file file)))))))
+                               'agent-shell-diff-file file))
+          (when-let* ((line (map-elt diff :line)))
+            (put-text-property section-start (point)
+                               'agent-shell-diff-line line)))))))
 
 (defun agent-shell-diff--diff-section-string (old new file)
   "Return a cleaned diff between OLD and NEW for FILE.

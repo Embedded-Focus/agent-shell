@@ -1114,7 +1114,26 @@ it can be restored when the user returns to edit mode."
                   :acp-tool-call '((content . [((type . "diff")
                                                 (newText . "new")
                                                 (path . "created.el"))])))
-                 '(((:old . "") (:new . "new") (:file . "created.el"))))))
+                 '(((:old . "") (:new . "new") (:file . "created.el")))))
+
+  ;; Test the ACP `locations' line is carried as a hint when its path
+  ;; matches the diff.
+  (should (equal (agent-shell--make-diff-infos
+                  :acp-tool-call '((content . ((type . "diff")
+                                               (oldText . "a")
+                                               (newText . "b")
+                                               (path . "foo.el")))
+                                   (locations . [((path . "foo.el") (line . 42))])))
+                 '(((:old . "a") (:new . "b") (:file . "foo.el") (:line . 42)))))
+
+  ;; Test a non-matching location path contributes no hint.
+  (should (equal (agent-shell--make-diff-infos
+                  :acp-tool-call '((content . ((type . "diff")
+                                               (oldText . "a")
+                                               (newText . "b")
+                                               (path . "foo.el")))
+                                   (locations . [((path . "other.el") (line . 42))])))
+                 '(((:old . "a") (:new . "b") (:file . "foo.el"))))))
 
 (ert-deftest agent-shell--diffs-line-stats-test ()
   "Test `agent-shell--diffs-line-stats' aggregates across diffs."

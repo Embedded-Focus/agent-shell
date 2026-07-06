@@ -2753,68 +2753,94 @@ Example output:
 (cl-defun agent-shell--make-diff-infos (&key acp-tool-call)
   "Make a list of diff infos from ACP-TOOL-CALL.
 
-ACP-TOOL-CALL is an ACP tool call object that may contain diff info in
-either `content' (standard ACP format) or `rawInput' (eg.  Copilot).
-
 A single tool call may carry more than one diff (eg.  Codex editing
 several files in one turn), so this returns a list with one entry per
 diff.  See https://github.com/xenodium/agent-shell/issues/580
 
-Standard ACP format uses content with type \"diff\" containing
-oldText/newText/path fields.
+Diff items are extracted by `agent-shell--diff-items' and converted by
+`agent-shell--make-diff-info', which documents each entry's schema."
+  (let ((locations (map-elt acp-tool-call 'locations)))
+    (seq-keep (lambda (diff-item)
+                (agent-shell--make-diff-info
+                 :acp-diff-item diff-item
+                 :locations locations))
+              (agent-shell--diff-items acp-tool-call))))
 
-See https://agentclientprotocol.com/protocol/schema#toolcallcontent
+(defun agent-shell--diff-items (acp-tool-call)
+  "Return the raw diff items in ACP-TOOL-CALL.
 
-Copilot sends old_str/new_str/path in rawInput instead.
+Diffs may arrive as standard ACP content with type \"diff\" containing
+oldText/newText/path fields:
 
-See https://github.com/xenodium/agent-shell/issues/217
+  https://agentclientprotocol.com/protocol/schema#toolcallcontent
 
-Returns a list of alists, each in the form:
+or, for some agents, in rawInput (eg.  Copilot sends old_str/new_str/path;
+see https://github.com/xenodium/agent-shell/issues/217).
 
- `((:old . old-text)
+Returns a list of alists with oldText/newText/path keys, normalizing
+rawInput variants to that shape."
+  (let ((content (map-elt acp-tool-call 'content))
+        (raw-input (map-elt acp-tool-call 'rawInput)))
+    (cond
+     ;; Single diff object
+     ((and content (equal (map-elt content 'type) "diff"))
+      (list content))
+     ;; Vector/array content - collect all diff items
+     ((vectorp content)
+      (seq-filter (lambda (item)
+                    (equal (map-elt item 'type) "diff"))
+                  content))
+     ;; List content - collect all diff items
+     ((and content (listp content))
+      (seq-filter (lambda (item)
+                    (equal (map-elt item 'type) "diff"))
+                  content))
+     ;; Attempt to get from rawInput.
+     ((and raw-input (map-elt raw-input 'new_str))
+      (list `((oldText . ,(or (map-elt raw-input 'old_str) ""))
+              (newText . ,(map-elt raw-input 'new_str))
+              (path . ,(map-elt raw-input 'path)))))
+     ;; Attempt diff from rawInput (eg. Copilot).
+     ((and raw-input (map-elt raw-input 'diff))
+      (let ((parsed (agent-shell--parse-unified-diff
+                     (map-elt raw-input 'diff))))
+        (list `((oldText . ,(car parsed))
+                (newText . ,(cdr parsed))
+                (path . ,(or (map-elt raw-input 'fileName)
+                             (map-elt raw-input 'path))))))))))
+
+(cl-defun agent-shell--make-diff-info (&key acp-diff-item locations)
+  "Convert a single ACP-DIFF-ITEM to a diff info alist.
+
+ACP-DIFF-ITEM is an alist with oldText/newText/path keys, as produced by
+`agent-shell--diff-items'.
+
+LOCATIONS is the ACP tool call `locations' array.  When an entry's path
+matches the diff, its line is carried as a hint for locating the change.
+It is optional (and often absent), but authoritative when present.
+
+Returns an alist of the form:
+
+  ((:old . old-text)
    (:new . new-text)
-   (:file . file-path))."
-  (let* ((content (map-elt acp-tool-call 'content))
-         (raw-input (map-elt acp-tool-call 'rawInput))
-         (diff-items
-          (cond
-           ;; Single diff object
-           ((and content (equal (map-elt content 'type) "diff"))
-            (list content))
-           ;; Vector/array content - collect all diff items
-           ((vectorp content)
-            (seq-filter (lambda (item)
-                          (equal (map-elt item 'type) "diff"))
-                        content))
-           ;; List content - collect all diff items
-           ((and content (listp content))
-            (seq-filter (lambda (item)
-                          (equal (map-elt item 'type) "diff"))
-                        content))
-           ;; Attempt to get from rawInput.
-           ((and raw-input (map-elt raw-input 'new_str))
-            (list `((oldText . ,(or (map-elt raw-input 'old_str) ""))
-                    (newText . ,(map-elt raw-input 'new_str))
-                    (path . ,(map-elt raw-input 'path)))))
-           ;; Attempt diff from rawInput (eg. Copilot).
-           ((and raw-input (map-elt raw-input 'diff))
-            (let ((parsed (agent-shell--parse-unified-diff
-                           (map-elt raw-input 'diff))))
-              (list `((oldText . ,(car parsed))
-                      (newText . ,(cdr parsed))
-                      (path . ,(or (map-elt raw-input 'fileName)
-                                   (map-elt raw-input 'path))))))))))
-    (seq-keep
-     (lambda (diff-item)
-       (when-let* ((new-text (map-elt diff-item 'newText))
-                   (file-path (map-elt diff-item 'path)))
-         ;; oldText can be nil for Write tools creating new files, default
-         ;; to "".
-         ;; TODO: Currently don't have a way to capture overwrites
-         (list (cons :old (or (map-elt diff-item 'oldText) ""))
-               (cons :new new-text)
-               (cons :file file-path))))
-     diff-items)))
+   (:file . file-path)
+   (:line . hint-line))
+
+The :line entry is omitted when no matching location line is available.
+Returns nil when the item has no newText or path."
+  (when-let* ((new-text (map-elt acp-diff-item 'newText))
+              (file-path (map-elt acp-diff-item 'path)))
+    (append
+     ;; oldText can be nil for Write tools creating new files, default to "".
+     ;; TODO: Currently don't have a way to capture overwrites
+     (list (cons :old (or (map-elt acp-diff-item 'oldText) ""))
+           (cons :new new-text)
+           (cons :file file-path))
+     (when-let* ((location (seq-find (lambda (location)
+                                       (equal (map-elt location 'path) file-path))
+                                     locations))
+                 (line (map-elt location 'line)))
+       (list (cons :line line))))))
 
 ;; Based on https://github.com/editor-code-assistant/eca-emacs/blob/298849d1aae3241bf8828b6558c6deb45d75a3c8/eca-diff.el#L22
 (defun agent-shell--parse-unified-diff (diff-string)
