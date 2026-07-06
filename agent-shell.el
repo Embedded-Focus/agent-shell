@@ -1348,6 +1348,9 @@ Returns nil if no icon should be displayed."
                                  (map-elt config :icon-name))
                               (agent-shell--make-agent-fallback-icon
                                (map-elt config :buffer-name) 100)))
+             ;; Skip the icon when Emacs can't display this image type
+             ;; (e.g. SVG fallback icons on a build without SVG support).
+             ((image-supported-file-p icon-filename))
              (image (create-image icon-filename nil nil
                                   :ascent 'center
                                   :height (frame-char-height))))
