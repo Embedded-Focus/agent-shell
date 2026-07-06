@@ -1958,6 +1958,109 @@ remaining subscribers nor propagate out of `agent-shell--emit-event'."
       (should (= (length received-events) 1))
       (should (equal (map-elt (car received-events) :event) 'init-client)))))
 
+(ert-deftest agent-shell--sync-system-sleep-tracks-status-test ()
+  "Test system sleep tracks `agent-shell-status' across a turn."
+  ;; Pretend `system-sleep' is loadable so the helper runs on Emacs < 31.
+  (let ((blocked 0)
+        (status 'busy)
+        (features (cons 'system-sleep features))
+        (state (list (cons :buffer (current-buffer))
+                     (cons :event-subscriptions nil)
+                     (cons :sleep-token nil)))
+        (agent-shell-inhibit-system-sleep t))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () state))
+              ((symbol-function 'agent-shell-status)
+               (lambda (&rest _) status))
+              ((symbol-function 'system-sleep-block-sleep)
+               (lambda (&rest _) (setq blocked (1+ blocked)) 'token))
+              ((symbol-function 'system-sleep-unblock-sleep)
+               (lambda (_token) (setq blocked (1- blocked)))))
+      ;; Busy blocks sleep.
+      (setq status 'busy)
+      (agent-shell--emit-event :event 'input-submitted)
+      (should (equal (map-elt state :sleep-token) 'token))
+      (should (= blocked 1))
+
+      ;; Blocked (waiting on a permission) is waiting on user input, so
+      ;; it releases the block.
+      (setq status 'blocked)
+      (agent-shell--emit-event :event 'permission-request)
+      (should-not (map-elt state :sleep-token))
+      (should (= blocked 0))
+
+      ;; Resuming work blocks it again.
+      (setq status 'busy)
+      (agent-shell--emit-event :event 'permission-response)
+      (should (= blocked 1))
+
+      ;; Ready releases it.
+      (setq status 'ready)
+      (agent-shell--emit-event :event 'turn-complete)
+      (should-not (map-elt state :sleep-token))
+      (should (= blocked 0)))))
+
+(ert-deftest agent-shell--sync-system-sleep-terminal-event-releases-test ()
+  "Test `error'/`clean-up' release the block even when status reads busy."
+  (let ((blocked 0)
+        (features (cons 'system-sleep features))
+        (state (list (cons :buffer (current-buffer))
+                     (cons :event-subscriptions nil)
+                     (cons :sleep-token nil)))
+        (agent-shell-inhibit-system-sleep t))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () state))
+              ((symbol-function 'agent-shell-status)
+               (lambda (&rest _) 'busy))
+              ((symbol-function 'system-sleep-block-sleep)
+               (lambda (&rest _) (setq blocked (1+ blocked)) 'token))
+              ((symbol-function 'system-sleep-unblock-sleep)
+               (lambda (_token) (setq blocked (1- blocked)))))
+      (agent-shell--emit-event :event 'input-submitted)
+      (should (= blocked 1))
+      ;; Status still reports busy, but a terminal event must release.
+      (agent-shell--emit-event :event 'error)
+      (should-not (map-elt state :sleep-token))
+      (should (= blocked 0)))))
+
+(ert-deftest agent-shell--sync-system-sleep-disabled-is-noop-test ()
+  "Test no sleep block is acquired when the option is nil."
+  (let ((state (list (cons :buffer (current-buffer))
+                     (cons :event-subscriptions nil)
+                     (cons :sleep-token nil)))
+        (agent-shell-inhibit-system-sleep nil))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () state))
+              ((symbol-function 'agent-shell-status)
+               (lambda (&rest _) 'busy))
+              ((symbol-function 'system-sleep-block-sleep)
+               (lambda (&rest _) (error "Should not block sleep when disabled"))))
+      (agent-shell--emit-event :event 'input-submitted)
+      (should-not (map-elt state :sleep-token)))))
+
+(ert-deftest agent-shell--sync-system-sleep-single-token-test ()
+  "Test repeated busy events don't leak extra blocks."
+  (let ((blocked 0)
+        (features (cons 'system-sleep features))
+        (state (list (cons :buffer (current-buffer))
+                     (cons :event-subscriptions nil)
+                     (cons :sleep-token nil)))
+        (agent-shell-inhibit-system-sleep t))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () state))
+              ((symbol-function 'agent-shell-status)
+               (lambda (&rest _) 'busy))
+              ((symbol-function 'system-sleep-block-sleep)
+               (lambda (&rest _) (setq blocked (1+ blocked)) 'token))
+              ((symbol-function 'system-sleep-unblock-sleep)
+               (lambda (_token) (setq blocked (1- blocked)))))
+      (agent-shell--emit-event :event 'input-submitted)
+      (agent-shell--emit-event :event 'tool-call-update)
+      (should (= blocked 1))
+
+      (agent-shell--emit-event :event 'clean-up)
+      (should (= blocked 0)))))
+
 (ert-deftest agent-shell-subscribe-to-prompt-ready-test ()
   "Test subscribing to `prompt-ready' event."
   (let* ((received-events nil)

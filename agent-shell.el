@@ -459,6 +459,22 @@ is added automatically."
                  (repeat :tag "Custom frames" string))
   :group 'agent-shell)
 
+(defcustom agent-shell-inhibit-system-sleep t
+  "Non-nil to keep the system awake while an agent is busy.
+
+Long-running agent turns can outlast the system idle-sleep timeout,
+suspending the machine (and the agent) before the turn completes.  When
+non-nil, agent-shell blocks system idle sleep for the duration of each
+turn and releases the block once the turn finishes, so the system is
+only kept awake while there is work in progress.  The display is still
+allowed to blank.
+
+This relies on the `system-sleep' library introduced in Emacs 31.1 and
+has no effect on earlier versions.  It does not prevent \"hard\" sleep
+such as closing a laptop lid."
+  :type 'boolean
+  :group 'agent-shell)
+
 (defcustom agent-shell-screenshot-command
   (if (eq system-type 'darwin)
       '("/usr/sbin/screencapture" "-i")
@@ -921,6 +937,7 @@ OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
         (cons :prompt-capabilities nil)
         (cons :event-subscriptions nil)
         (cons :idle-timer nil)
+        (cons :sleep-token nil)
         (cons :active-requests nil)
         (cons :pending-requests nil)
         (cons :usage (list (cons :total-tokens 0)
@@ -4675,6 +4692,39 @@ SUBSCRIPTION is a token returned by `agent-shell-subscribe-to'."
                           (equal (map-elt sub :token) subscription))
                         (map-elt (agent-shell--state) :event-subscriptions))))
 
+(defun agent-shell--inhibit-sleep (state)
+  "Block system idle sleep for STATE's shell if so configured.
+
+No-op unless `agent-shell-inhibit-system-sleep' is non-nil and the
+`system-sleep' library (Emacs 31.1+) is available.  The block is
+recorded in STATE and released by `agent-shell--uninhibit-sleep'."
+  ;; Block system idle sleep but allow the display to blank.
+  (when-let* ((agent-shell-inhibit-system-sleep)
+              ((not (map-elt state :sleep-token)))
+              ((require 'system-sleep nil t))
+              ((fboundp 'system-sleep-block-sleep))
+              (token (system-sleep-block-sleep "agent-shell (agent busy)" t)))
+    (map-put! state :sleep-token token)))
+
+(defun agent-shell--uninhibit-sleep (state)
+  "Release any system sleep block held by STATE's shell."
+  (when-let* ((token (map-elt state :sleep-token))
+              ((fboundp 'system-sleep-unblock-sleep)))
+    (system-sleep-unblock-sleep token)
+    (map-put! state :sleep-token nil)))
+
+(defun agent-shell--sync-system-sleep (state)
+  "Block or release system sleep to match STATE's shell status.
+Blocks only while `agent-shell-status' is `busy' (the agent is actively
+processing).  Releases otherwise, including when `blocked' (waiting on a
+permission response), since that is waiting on user input rather than
+work in progress."
+  (when-let* ((buffer (map-elt state :buffer))
+              ((buffer-live-p buffer)))
+    (if (eq (agent-shell-status :shell-buffer buffer) 'busy)
+        (agent-shell--inhibit-sleep state)
+      (agent-shell--uninhibit-sleep state))))
+
 (cl-defun agent-shell--emit-event (&key event data)
   "Emit an EVENT to matching subscribers.
 EVENT is a symbol identifying the event.
@@ -4683,6 +4733,12 @@ DATA is an optional alist of event-specific data."
         (event-alist (list (cons :event event))))
     (when data
       (push (cons :data data) event-alist))
+    ;; Keep the system awake while the agent is working.  `error' and
+    ;; `clean-up' are emitted before the shell clears its busy state, so
+    ;; release explicitly rather than reading a stale status.
+    (pcase event
+      ((or 'error 'clean-up) (agent-shell--uninhibit-sleep state))
+      (_ (agent-shell--sync-system-sleep state)))
     (dolist (sub (map-elt state :event-subscriptions))
       (when (and (buffer-live-p (map-elt state :buffer))
                  (or (not (map-elt sub :event))
