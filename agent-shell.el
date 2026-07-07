@@ -602,6 +602,7 @@ Goose, Cursor, CodeBuddy, Auggie, and others."
         (agent-shell-github-make-copilot-config)
         (agent-shell-google-make-gemini-config)
         (agent-shell-goose-make-agent-config)
+        (agent-shell-hermes-make-agent-config)
         (agent-shell-kimi-make-config)
         (agent-shell-kiro-make-config)
         (agent-shell-mistral-make-config)
