@@ -24,6 +24,24 @@
     (setf (alist-get :object copy) object)
     copy))
 
+(defun agent-shell-fakes--complete-capture-p (messages)
+  "Return non-nil when MESSAGES is a full capture starting at `initialize'.
+
+A complete capture already carries the `initialize' handshake and every
+init response, so the fake client replays it verbatim with matching ids.
+Synthesising a prelude for such a capture would duplicate responses and
+throw the id sequence off."
+  (when-let* ((first-request (seq-find (lambda (item)
+                                         (eq (map-elt item :direction) 'outgoing))
+                                       messages)))
+    (and (equal (map-nested-elt first-request '(:object method)) "initialize")
+         (seq-find (lambda (item)
+                     (and (eq (map-elt item :direction) 'incoming)
+                          (equal (map-nested-elt item '(:object id))
+                                 (map-nested-elt first-request '(:object id)))
+                          (map-contains-key (map-elt item :object) 'result)))
+                   messages))))
+
 (defun agent-shell-fakes--synth-prelude (messages)
   "Prepend synthetic init responses to MESSAGES and renumber to match.
 
@@ -31,7 +49,18 @@ Captured traffic files typically start mid-session and lack responses
 for `initialize', `authenticate' (when applicable), and `session/new'.
 Synthesise minimal responses for those at ids 1..N, then renumber the
 first captured outgoing `session/prompt' request and its matching
-response so they line up with the id the fake client will allocate."
+response so they line up with the id the fake client will allocate.
+
+A complete capture (starting at `initialize', see
+`agent-shell-fakes--complete-capture-p') already lines up, so return it
+untouched."
+  (if (agent-shell-fakes--complete-capture-p messages)
+      messages
+    (agent-shell-fakes--synth-prelude-1 messages)))
+
+(defun agent-shell-fakes--synth-prelude-1 (messages)
+  "Synthesise an init prelude for a mid-session capture MESSAGES.
+See `agent-shell-fakes--synth-prelude', which delegates here."
   (let* ((has-auth (and (acp-fakes--get-authenticate-request :messages messages) t))
          (init-id 1)
          (auth-id (when has-auth 2))
@@ -132,7 +161,7 @@ response so they line up with the id the fake client will allocate."
                   :needs-authentication authenticate-request
                   :authenticate-request-maker (lambda ()
                                                 authenticate-request)))
-         (buffer (agent-shell--start :config config :session-strategy 'new-deferred)))
+         (buffer (agent-shell--start :config config :session-strategy 'new)))
     buffer))
 
 (defun agent-shell-fakes---welcome-message (config)

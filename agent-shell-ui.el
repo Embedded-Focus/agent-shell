@@ -105,12 +105,7 @@ O(accumulated-body).  Label-only updates leave the body untouched."
                ((and match (not create-new))
                 (let* ((state (get-text-property (prop-match-beginning match)
                                                  'agent-shell-ui-state))
-                       (collapsed (map-elt state :collapsed))
-                       (existing-body-range
-                        (agent-shell-ui--nearest-range-matching-property
-                         :property 'agent-shell-ui-section :value 'body
-                         :from (prop-match-beginning match)
-                         :to (prop-match-end match))))
+                       (collapsed (map-elt state :collapsed)))
                   (setq block-start (prop-match-beginning match))
                   (save-excursion
                     (goto-char block-start)
@@ -123,47 +118,54 @@ O(accumulated-body).  Label-only updates leave the body untouched."
                     (agent-shell-ui--replace-label
                      qualified-id 'label-right new-label-right))
                   (when new-body
-                    (cond
-                     ;; Append to existing body — preserves rendered content.
-                     ((and append existing-body-range)
-                      (agent-shell-ui--append-body
-                       existing-body-range new-body qualified-id collapsed))
-                     ;; Replace existing body in place.
-                     (existing-body-range
-                      (agent-shell-ui--replace-body
-                       existing-body-range new-body qualified-id collapsed))
-                     ;; Body arriving for the first time on a labels-only
-                     ;; block — fall back to delete-and-regenerate so the
-                     ;; indicator transitions from placeholder to triangle
-                     ;; and the labels↔body separator is inserted.  Labels
-                     ;; are recovered from the buffer (no cache).  The block
-                     ;; extent is re-derived from the buffer here because
-                     ;; `agent-shell-ui--replace-label' may have changed
-                     ;; label length, leaving the original `prop-match-end'
-                     ;; stale.
-                     (t
-                      (let* ((current-block-range
-                              (agent-shell-ui--block-range :position block-start))
-                             (current-block-end
-                              (or (map-elt current-block-range :end)
-                                  (prop-match-end match)))
-                             (existing-labels
-                              (agent-shell-ui--read-fragment-labels
-                               block-start current-block-end))
-                             (final-model
-                              (list (cons :namespace-id namespace-id)
-                                    (cons :block-id (map-elt model :block-id))
-                                    (cons :label-left
-                                          (or new-label-left
-                                              (map-elt existing-labels :label-left)))
-                                    (cons :label-right
-                                          (or new-label-right
-                                              (map-elt existing-labels :label-right)))
-                                    (cons :body new-body))))
-                        (delete-region block-start current-block-end)
-                        (goto-char block-start)
-                        (agent-shell-ui--insert-fragment
-                         final-model qualified-id (not collapsed) navigation)))))
+                    ;; Re-derive the block extent and body range here,
+                    ;; after the label replacements.  `agent-shell-ui--replace-label'
+                    ;; can change a label's length, which shifts everything
+                    ;; below it — a range captured before the replacements
+                    ;; would point at the wrong chars (e.g. handing
+                    ;; `replace-body' a stale range corrupts the body
+                    ;; boundary and leaks its content past the collapse).
+                    (let* ((current-block-end
+                            (or (map-elt (agent-shell-ui--block-range :position block-start)
+                                         :end)
+                                (prop-match-end match)))
+                           (existing-body-range
+                            (agent-shell-ui--nearest-range-matching-property
+                             :property 'agent-shell-ui-section :value 'body
+                             :from block-start
+                             :to current-block-end)))
+                      (cond
+                       ;; Append to existing body — preserves rendered content.
+                       ((and append existing-body-range)
+                        (agent-shell-ui--append-body
+                         existing-body-range new-body qualified-id collapsed))
+                       ;; Replace existing body in place.
+                       (existing-body-range
+                        (agent-shell-ui--replace-body
+                         existing-body-range new-body qualified-id collapsed))
+                       ;; Body arriving for the first time on a labels-only
+                       ;; block — fall back to delete-and-regenerate so the
+                       ;; indicator transitions from placeholder to triangle
+                       ;; and the labels↔body separator is inserted.  Labels
+                       ;; are recovered from the buffer (no cache).
+                       (t
+                        (let* ((existing-labels
+                                (agent-shell-ui--read-fragment-labels
+                                 block-start current-block-end))
+                               (final-model
+                                (list (cons :namespace-id namespace-id)
+                                      (cons :block-id (map-elt model :block-id))
+                                      (cons :label-left
+                                            (or new-label-left
+                                                (map-elt existing-labels :label-left)))
+                                      (cons :label-right
+                                            (or new-label-right
+                                                (map-elt existing-labels :label-right)))
+                                      (cons :body new-body))))
+                          (delete-region block-start current-block-end)
+                          (goto-char block-start)
+                          (agent-shell-ui--insert-fragment
+                           final-model qualified-id (not collapsed) navigation))))))
                   (setq padding-end
                         (or (when-let* ((block-range
                                          (agent-shell-ui--block-range :position block-start)))
@@ -398,9 +400,17 @@ When NO-UNDO is non-nil, disable undo recording for this operation."
       (when match
         (let ((block-start (prop-match-beginning match))
               (block-end (prop-match-end match)))
-          ;; Remove vertical space that's part of the block.
+          ;; Remove trailing vertical space that's part of the block, but
+          ;; stop at the next fragment's content.  The next fragment's
+          ;; leading indicator (e.g. the "  " collapse placeholder) is
+          ;; whitespace too, so a plain `skip-chars-forward' would swallow
+          ;; it and misalign that fragment.  Its chars carry an
+          ;; `agent-shell-ui-state', which the inter-block separators do not.
           (goto-char block-end)
-          (skip-chars-forward " \t\n")
+          (while (and (not (eobp))
+                      (memq (char-after) '(?\s ?\t ?\n))
+                      (not (get-text-property (point) 'agent-shell-ui-state)))
+            (forward-char 1))
           (setq block-end (point))
           (delete-region block-start block-end))))))
 

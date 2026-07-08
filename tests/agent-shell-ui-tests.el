@@ -264,6 +264,72 @@ but `:qualified-id` is stable.  Toggle resolves the target via
           (should (agent-shell-ui-tests--fragment-collapsed-p "ns" "1")))
       (kill-buffer buf))))
 
+(defun agent-shell-ui-tests--visible-body-p ()
+  "Return non-nil if any body-section char in the buffer is visible.
+A collapsed fragment must keep every body char `invisible'."
+  (save-mark-and-excursion
+    (goto-char (point-min))
+    (catch 'visible
+      (while (< (point) (point-max))
+        (when (and (eq (get-text-property (point) 'agent-shell-ui-section) 'body)
+                   (not (get-text-property (point) 'invisible)))
+          (throw 'visible t))
+        (goto-char (or (next-single-property-change (point) 'agent-shell-ui-section)
+                       (point-max))))
+      nil)))
+
+(ert-deftest agent-shell-ui-body-stays-collapsed-after-label-length-change-test ()
+  "A collapsed body stays hidden when a label update changes label length.
+
+A combined label+body update replaces the label first, which can change
+its length and shift the body below it.  Deriving the body range before
+that replacement leaves it stale, so `--replace-body' corrupts the body
+boundary and leaks the collapsed content into view (e.g. a diff spilling
+out of a collapsed edit tool call).  The label-right sits right above the
+body, so growing it shifts the body the most.  The body must stay
+invisible across the update."
+  (let ((buf (agent-shell-ui-tests--make-buffer-with-fragments
+              '(((:namespace-id . "ns") (:block-id . "1")
+                 (:label-left . "Edit") (:label-right . "short")
+                 (:body . "first body\nsecond line"))))))
+    (unwind-protect
+        (with-current-buffer buf
+          ;; Sanity: the body starts collapsed (hidden).
+          (should-not (agent-shell-ui-tests--visible-body-p))
+          ;; Grow the adjacent label-right and replace the body at once.
+          (agent-shell-ui-update-fragment
+           (agent-shell-ui-make-fragment-model
+            :namespace-id "ns" :block-id "1"
+            :label-left "Edit" :label-right "a much longer right label than before"
+            :body "second body content\nanother line")
+           :append nil :navigation 'always)
+          (should-not (agent-shell-ui-tests--visible-body-p)))
+      (kill-buffer buf))))
+
+;;; delete-fragment
+
+(ert-deftest agent-shell-ui-delete-fragment-preserves-next-indicator-test ()
+  "Deleting a fragment keeps the following fragment's leading indicator.
+
+A collapsed labels-only fragment reserves a two-space indicator
+placeholder for column alignment.  Deleting the fragment right above it
+must not consume that placeholder.  Regression: a permission dialog
+deleted on tool-call completion swallowed the next tool call's indent
+because `agent-shell-ui-delete-fragment' skipped trailing whitespace
+straight into the next block's leading spaces."
+  (let ((buf (agent-shell-ui-tests--make-buffer-with-fragments
+              '(((:namespace-id . "ns") (:block-id . "top")
+                 (:label-left . "Top"))
+                ((:namespace-id . "ns") (:block-id . "next")
+                 (:label-left . "Next"))))))
+    (unwind-protect
+        (with-current-buffer buf
+          (agent-shell-ui-delete-fragment :namespace-id "ns" :block-id "top")
+          (let ((start (agent-shell-ui-tests--fragment-start "ns-next")))
+            (should start)
+            (should (equal "  " (buffer-substring-no-properties start (+ start 2))))))
+      (kill-buffer buf))))
+
 ;;; backward-block
 
 (defun agent-shell-ui-tests--fragment-start (qualified-id)
