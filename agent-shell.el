@@ -53,6 +53,7 @@
 (unless (require 'markdown-overlays nil 'noerror)
   (error "Please update 'shell-maker' to v0.91.2 or newer"))
 (require 'agent-shell-artist)
+(require 'agent-shell-faces)
 (require 'agent-shell-markdown)
 (require 'agent-shell-anthropic)
 (require 'agent-shell-auggie)
@@ -1522,16 +1523,16 @@ buffers are available or nothing was selected."
                      (cons (propertize
                             (concat
                              (string-pad (propertize (map-elt e :name)
-                                                     'face 'font-lock-variable-name-face)
+                                                     'face 'agent-shell-buffer-name)
                                          (1+ name-width))
                              (string-pad (propertize (map-elt e :status)
                                                      'face (pcase (map-elt e :status)
-                                                             ("busy" 'warning)
-                                                             ("blocked" 'error)
-                                                             (_ 'success)))
+                                                             ("busy" 'agent-shell-warning)
+                                                             ("blocked" 'agent-shell-error)
+                                                             (_ 'agent-shell-success)))
                                          (1+ status-width))
                              (propertize (map-elt e :title)
-                                         'face 'font-lock-doc-markup-face))
+                                         'face 'agent-shell-session-title))
                             'agent-shell--icon (map-elt e :icon))
                            (map-elt e :buffer)))
                    entries))
@@ -1965,7 +1966,7 @@ Includes pretty-printed JSON and a `file a feature request' link."
              (browse-url "https://github.com/xenodium/agent-shell/issues/new/choose"))
            (lambda ()
              (message "Press RET to open URL"))
-           'link)
+           'agent-shell-link)
           (agent-shell-with-work-buffer
             (insert (json-serialize acp-notification))
             (json-pretty-print (point-min) (point-max))
@@ -2057,7 +2058,7 @@ pretty-printed JSON inside a json fence."
             :state state
             :block-id "out-of-turn-acp-bug"
             :label-left (propertize "Out of turn - ACP server bug"
-                                    'font-lock-face 'font-lock-doc-markup-face)
+                                    'font-lock-face 'agent-shell-section-heading)
             :body (agent-shell--make-out-of-session-turn-notification-body state acp-notification)
             :append t
             :above-last-prompt t))
@@ -2101,7 +2102,7 @@ pretty-printed JSON inside a json fence."
                (agent-shell--update-fragment
                 :state state
                 :block-id (concat (map-nested-elt acp-notification '(params update toolCallId)) "-plan")
-                :label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
+                :label-left (propertize "Proposed plan" 'font-lock-face 'agent-shell-section-heading)
                 :body (agent-shell--format-plan (map-nested-elt acp-notification '(params update rawInput plan)))
                 :expanded t)))
            (map-put! state :last-entry-type "tool_call"))
@@ -2124,7 +2125,7 @@ pretty-printed JSON inside a json fence."
               :label-left  (concat
                             agent-shell-thought-process-icon
                             " "
-                            (propertize "Thinking" 'font-lock-face 'font-lock-doc-markup-face))
+                            (propertize "Thinking" 'font-lock-face 'agent-shell-section-heading))
               :body content
               :append (equal (map-elt state :last-entry-type)
                              "agent_thought_chunk")
@@ -2168,12 +2169,12 @@ pretty-printed JSON inside a json fence."
                           (concat (propertize
                                    (map-nested-elt
                                     state '(:agent-config :shell-prompt))
-                                   'font-lock-face 'comint-highlight-prompt
+                                   'font-lock-face 'agent-shell-prompt
                                    'field 'output)
                                   (propertize content-text
-                                              'font-lock-face 'comint-highlight-input))
+                                              'font-lock-face 'agent-shell-input))
                         (propertize content-text
-                                    'font-lock-face 'comint-highlight-input))
+                                    'font-lock-face 'agent-shell-input))
                 :create-new new-prompt-p
                 :append t))
              (map-put! state :last-entry-type "user_message_chunk")))
@@ -2181,7 +2182,7 @@ pretty-printed JSON inside a json fence."
            (agent-shell--update-fragment
             :state state
             :block-id "plan"
-            :label-left (propertize "Plan" 'font-lock-face 'font-lock-doc-markup-face)
+            :label-left (propertize "Plan" 'font-lock-face 'agent-shell-section-heading)
             :body (agent-shell--format-plan (map-nested-elt acp-notification '(params update entries)))
             :expanded t)
            (map-put! state :last-entry-type "plan"))
@@ -2313,7 +2314,7 @@ pretty-printed JSON inside a json fence."
             :state state
             :namespace-id "bootstrapping"
             :block-id "available_commands_update"
-            :label-left (propertize "Available /commands" 'font-lock-face 'font-lock-doc-markup-face)
+            :label-left (propertize "Available /commands" 'font-lock-face 'agent-shell-section-heading)
             :body (agent-shell--format-available-commands (map-nested-elt acp-notification '(params update availableCommands))))
            (map-put! state :last-entry-type "available_commands_update"))
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "current_mode_update")
@@ -2363,7 +2364,7 @@ pretty-printed JSON inside a json fence."
             :state state
             :block-id "unhandled-notification"
             :label-left (propertize "Unhandled"
-                                    'font-lock-face 'font-lock-doc-markup-face)
+                                    'font-lock-face 'agent-shell-section-heading)
             :body (agent-shell--make-unhandled-notification-body acp-notification)
             :append t
             :above-last-prompt (not (shell-maker-busy)))
@@ -2373,7 +2374,7 @@ pretty-printed JSON inside a json fence."
           :state state
           :block-id "unhandled-notification"
           :label-left (propertize "Unhandled"
-                                  'font-lock-face 'font-lock-doc-markup-face)
+                                  'font-lock-face 'agent-shell-section-heading)
           :body (agent-shell--make-unhandled-notification-body acp-notification)
           :append t
           :above-last-prompt (not (shell-maker-busy)))
@@ -2419,7 +2420,7 @@ pretty-printed JSON inside a json fence."
                (agent-shell--update-fragment
                 :state state
                 :block-id (concat tool-call-id "-plan")
-                :label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
+                :label-left (propertize "Proposed plan" 'font-lock-face 'agent-shell-section-heading)
                 :body (agent-shell--format-plan (map-nested-elt acp-request '(params toolCall rawInput plan)))
                 :expanded t))
              ;; block-id must be the same as the one used
@@ -2669,10 +2670,10 @@ https://agentclientprotocol.com/protocol/schema#param-stop-reason"
     (lambda (cmd)
       (concat
        (propertize (concat "/" (map-elt cmd 'name))
-                   'font-lock-face 'font-lock-function-name-face)
+                   'font-lock-face 'agent-shell-list-name)
        "\n"
        (propertize (map-elt cmd 'description)
-                   'font-lock-face 'font-lock-comment-face)))
+                   'font-lock-face 'agent-shell-list-description)))
     commands)
    "\n\n"))
 
@@ -2738,11 +2739,11 @@ Example output:
      :columns (list
                (lambda (pair)
                  (propertize (car pair)
-                             'font-lock-face 'font-lock-function-name-face))
+                             'font-lock-face 'agent-shell-list-name))
                (lambda (pair)
                  (when (cdr pair)
                    (propertize (cdr pair)
-                               'font-lock-face 'font-lock-comment-face))))
+                               'font-lock-face 'agent-shell-list-description))))
      :joiner "\n")))
 
 (cl-defun agent-shell--make-diff-infos (&key acp-tool-call)
@@ -3104,9 +3105,9 @@ side)."
   %s
 
 ╰─"
-          (propertize "⚠" 'font-lock-face 'error)
+          (propertize "⚠" 'font-lock-face 'agent-shell-error)
           (or code "?")
-          (propertize "⚠" 'font-lock-face 'error)
+          (propertize "⚠" 'font-lock-face 'agent-shell-error)
           (or message "¯\\_ (ツ)_/¯")
           (agent-shell--make-button
            :text "Details" :help "Details" :kind 'error
@@ -3374,13 +3375,13 @@ Returns propertized labels in :status and :title propertized."
                               (not (equal (string-remove-prefix "`" (string-remove-suffix "`" (string-trim title)))
                                           (string-remove-prefix "`" (string-remove-suffix "`" (string-trim description))))))
                          (concat
-                          (propertize title 'font-lock-face 'font-lock-doc-markup-face)
+                          (propertize title 'font-lock-face 'agent-shell-section-heading)
                           " "
-                          (propertize description 'font-lock-face 'font-lock-doc-face)))
+                          (propertize description 'font-lock-face 'agent-shell-section-annotation)))
                         (title
-                         (propertize title 'font-lock-face 'font-lock-doc-markup-face))
+                         (propertize title 'font-lock-face 'agent-shell-section-heading))
                         (description
-                         (propertize description 'font-lock-face 'font-lock-doc-markup-face)))))
+                         (propertize description 'font-lock-face 'agent-shell-section-heading)))))
       `((:status . ,(agent-shell--make-status-kind-label
                      :status (map-elt tool-call :status)
                      :kind (map-elt tool-call :kind)))
@@ -4123,7 +4124,7 @@ A buffer-local hash table mapping cache keys to header strings.")
   (when-let* ((agent-shell-show-session-id)
               (session-id (map-nested-elt (agent-shell--state) '(:session :id)))
               ((not (string-empty-p session-id))))
-    (propertize session-id 'font-lock-face 'font-lock-constant-face)))
+    (propertize session-id 'font-lock-face 'agent-shell-session-id)))
 
 (defun agent-shell--face-foreground (face)
   "Return the foreground color for FACE, walking `:inherit' chains.
@@ -4223,7 +4224,7 @@ When provided, included in help-echo tooltips."
                                  (map-elt header-model :bindings)))
          (help-chunk (when help-binding
                        (concat (propertize (map-elt help-binding :key)
-                                           'face 'help-key-binding)
+                                           'face 'agent-shell-key-binding)
                                " "
                                (map-elt help-binding :description))))
          (text-header (format " %s%s%s%s%s ➤ %s%s%s%s%s"
@@ -4240,13 +4241,13 @@ When provided, included in help-echo tooltips."
                                         " ➤ "))
                                (t ""))
                               (propertize (map-elt header-model :buffer-name)
-                                          'font-lock-face 'font-lock-variable-name-face)
+                                          'font-lock-face 'agent-shell-buffer-name)
                               (if (map-elt header-model :model-name)
                                   (concat " ➤ " (propertize (map-elt header-model :model-name)
-                                                            'font-lock-face 'font-lock-negation-char-face
+                                                            'font-lock-face 'agent-shell-model
                                                             'help-echo (concat "Click to open LLM model menu "
                                                                                (when model-binding
-                                                                                 (propertize model-binding 'face 'help-key-binding)))
+                                                                                 (propertize model-binding 'face 'agent-shell-key-binding)))
                                                             'mouse-face 'mode-line-highlight
                                                             'local-map (let ((map (make-sparse-keymap)))
                                                                          (define-key map [header-line down-mouse-1] #'ignore)
@@ -4256,10 +4257,10 @@ When provided, included in help-echo tooltips."
                                 "")
                               (if (map-elt header-model :thought-level-name)
                                   (concat " ➤ " (propertize (map-elt header-model :thought-level-name)
-                                                            'font-lock-face 'font-lock-keyword-face
+                                                            'font-lock-face 'agent-shell-thought-level
                                                             'help-echo (concat "Click to open thought level menu "
                                                                                (when thought-level-binding
-                                                                                 (propertize thought-level-binding 'face 'help-key-binding)))
+                                                                                 (propertize thought-level-binding 'face 'agent-shell-key-binding)))
                                                             'mouse-face 'mode-line-highlight
                                                             'local-map (let ((map (make-sparse-keymap)))
                                                                          (define-key map [header-line down-mouse-1] #'ignore)
@@ -4269,10 +4270,10 @@ When provided, included in help-echo tooltips."
                                 "")
                               (if (map-elt header-model :mode-name)
                                   (concat " ➤ " (propertize (map-elt header-model :mode-name)
-                                                            'font-lock-face 'font-lock-type-face
+                                                            'font-lock-face 'agent-shell-session-mode
                                                             'help-echo (concat "Click to open session mode menu "
                                                                                (when mode-binding
-                                                                                 (propertize mode-binding 'face 'help-key-binding)))
+                                                                                 (propertize mode-binding 'face 'agent-shell-key-binding)))
                                                             'mouse-face 'mode-line-highlight
                                                             'local-map (let ((map (make-sparse-keymap)))
                                                                          (define-key map [header-line down-mouse-1] #'ignore)
@@ -4280,7 +4281,7 @@ When provided, included in help-echo tooltips."
                                                                                      (agent-shell--mode-line-mode-menu))
                                                                          map)))
                                 "")
-                              (propertize (map-elt header-model :project-name) 'font-lock-face 'font-lock-string-face)
+                              (propertize (map-elt header-model :project-name) 'font-lock-face 'agent-shell-session-directory)
                               (if (map-elt header-model :session-id)
                                   (concat " ➤ " (map-elt header-model :session-id))
                                 "")
@@ -4355,7 +4356,7 @@ When provided, included in help-echo tooltips."
                                       ;; Agent name
                                       (dom-append-child text-node
                                                         (dom-node 'tspan
-                                                                  `((fill . ,(agent-shell--svg-fill-color 'font-lock-variable-name-face)))
+                                                                  `((fill . ,(agent-shell--svg-fill-color 'agent-shell-buffer-name)))
                                                                   (map-elt header-model :buffer-name)))
                                       ;; Model name (optional)
                                       (when (map-elt header-model :model-name)
@@ -4368,7 +4369,7 @@ When provided, included in help-echo tooltips."
                                         ;; Add model name
                                         (dom-append-child text-node
                                                           (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'font-lock-negation-char-face))
+                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-model))
                                                                       (dx . "8"))
                                                                     (map-elt header-model :model-name))))
                                       ;; Thought level (optional)
@@ -4380,7 +4381,7 @@ When provided, included in help-echo tooltips."
                                                                     "➤"))
                                         (dom-append-child text-node
                                                           (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'font-lock-keyword-face))
+                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-thought-level))
                                                                       (dx . "8"))
                                                                     (map-elt header-model :thought-level-name))))
                                       ;; Session mode (optional)
@@ -4394,7 +4395,7 @@ When provided, included in help-echo tooltips."
                                         ;; Add session mode text
                                         (dom-append-child text-node
                                                           (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'font-lock-type-face))
+                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-mode))
                                                                       (dx . "8"))
                                                                     (map-elt header-model :mode-name))))
                                       (when (map-elt header-model :context-indicator)
@@ -4435,7 +4436,7 @@ When provided, included in help-echo tooltips."
                                       ;; Directory path
                                       (dom-append-child text-node
                                                         (dom-node 'tspan
-                                                                  `((fill . ,(agent-shell--svg-fill-color 'font-lock-string-face))
+                                                                  `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-directory))
                                                                     ,@(when (map-elt header-model :position) '((dx . "8"))))
                                                                   (map-elt header-model :project-name)))
                                       ;; Session ID (optional)
@@ -4449,7 +4450,7 @@ When provided, included in help-echo tooltips."
                                         ;; Session ID text
                                         (dom-append-child text-node
                                                           (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'font-lock-constant-face))
+                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-id))
                                                                       (dx . "8"))
                                                                     (substring-no-properties (map-elt header-model :session-id)))))
                                       ;; Status (optional)
@@ -4485,7 +4486,7 @@ When provided, included in help-echo tooltips."
                                             ;; Add key (XML-escape angle brackets)
                                             (dom-append-child text-node
                                                               (dom-node 'tspan
-                                                                        `((fill . ,(agent-shell--svg-fill-color 'help-key-binding))
+                                                                        `((fill . ,(agent-shell--svg-fill-color 'agent-shell-key-binding))
                                                                           ,@(unless first '((dx . "8"))))
                                                                         (replace-regexp-in-string
                                                                          "<" "&lt;"
@@ -4899,7 +4900,7 @@ the original EVENT as :idle-event."
    :block-id "starting"
    :label-left (format "%s %s"
                        (agent-shell--make-status-kind-label :status "in_progress")
-                       (propertize "Starting agent" 'font-lock-face 'font-lock-doc-markup-face))
+                       (propertize "Starting agent" 'font-lock-face 'agent-shell-section-heading))
    :body "Creating client..."
    :create-new t)
   (if (map-elt (agent-shell--state) :client-maker)
@@ -4923,7 +4924,7 @@ the original EVENT as :idle-event."
    :block-id "starting"
    :label-left (format "%s %s"
                        (agent-shell--make-status-kind-label :status "in_progress")
-                       (propertize "Starting agent" 'font-lock-face 'font-lock-doc-markup-face))
+                       (propertize "Starting agent" 'font-lock-face 'agent-shell-section-heading))
    :body "\n\nSubscribing..."
    :append t)
   (if (map-elt agent-shell--state :client)
@@ -5032,7 +5033,7 @@ Must provide ON-INITIATED (lambda ())."
                       :state agent-shell--state
                       :namespace-id "bootstrapping"
                       :block-id "agent_capabilities"
-                      :label-left (propertize "Agent capabilities" 'font-lock-face 'font-lock-doc-markup-face)
+                      :label-left (propertize "Agent capabilities" 'font-lock-face 'agent-shell-section-heading)
                       :body (agent-shell--format-agent-capabilities agent-capabilities)))
                    (agent-shell--emit-event :event 'init-handshake))
                  (funcall on-initiated))
@@ -5190,7 +5191,7 @@ Call ON-MODEL-CHANGED on success."
        :state (agent-shell--state)
        :namespace-id "bootstrapping"
        :block-id "set-model"
-       :label-left (propertize "Setting model" 'font-lock-face 'font-lock-doc-markup-face)
+       :label-left (propertize "Setting model" 'font-lock-face 'agent-shell-section-heading)
        :body (format "Requesting %s..." model-id)))
     (agent-shell--config-option-set-model-id
      :model-id model-id
@@ -5216,7 +5217,7 @@ Call ON-MODE-CHANGED on success."
        :state (agent-shell--state)
        :namespace-id "bootstrapping"
        :block-id "set-session-mode"
-       :label-left (propertize "Setting session mode" 'font-lock-face 'font-lock-doc-markup-face)
+       :label-left (propertize "Setting session mode" 'font-lock-face 'agent-shell-section-heading)
        :body (format "Requesting %s..." mode-id)))
     (agent-shell--config-option-set-mode-id
      :mode-id mode-id
@@ -5373,11 +5374,12 @@ COLUMN is a symbol: `directory', `title', `date', or `session-id'.
   "Return the face for COLUMN in the session selection prompt.
 
   (agent-shell--session-column-face \\='directory)
-  ;; => `font-lock-keyword-face'"
+  ;; => `agent-shell-session-directory'"
   (pcase column
-    ('directory 'font-lock-keyword-face)
-    ('date 'font-lock-comment-face)
-    ('session-id 'font-lock-constant-face)
+    ('directory 'agent-shell-session-directory)
+    ('title 'agent-shell-session-title)
+    ('date 'agent-shell-session-date)
+    ('session-id 'agent-shell-session-id)
     (_ nil)))
 
 (defun agent-shell--session-selection-columns ()
@@ -5526,7 +5528,7 @@ overwrites an existing fragment with equivalent content."
      :namespace-id "bootstrapping"
      :block-id "available_commands_update"
      :label-left (propertize "Available /commands"
-                             'font-lock-face 'font-lock-doc-markup-face)))
+                             'font-lock-face 'agent-shell-section-heading)))
   (when-let* ((id-fn (map-nested-elt state '(:agent-config :default-model-id)))
               (model-id (funcall id-fn))
               ((not (map-elt state :set-model))))
@@ -5535,7 +5537,7 @@ overwrites an existing fragment with equivalent content."
      :namespace-id "bootstrapping"
      :block-id "set-model"
      :label-left (propertize "Setting model"
-                             'font-lock-face 'font-lock-doc-markup-face)
+                             'font-lock-face 'agent-shell-section-heading)
      :body (format "Requesting %s..." model-id)))
   (when-let* ((id-fn (map-nested-elt state '(:agent-config :default-session-mode-id)))
               (mode-id (funcall id-fn))
@@ -5545,7 +5547,7 @@ overwrites an existing fragment with equivalent content."
      :namespace-id "bootstrapping"
      :block-id "set-session-mode"
      :label-left (propertize "Setting session mode"
-                             'font-lock-face 'font-lock-doc-markup-face)
+                             'font-lock-face 'agent-shell-section-heading)
      :body (format "Requesting %s..." mode-id))))
 
 (defun agent-shell--display-session-options ()
@@ -5555,7 +5557,7 @@ overwrites an existing fragment with equivalent content."
      :state agent-shell--state
      :namespace-id "bootstrapping"
      :block-id "available_config_options"
-     :label-left (propertize "Available config options" 'font-lock-face 'font-lock-doc-markup-face)
+     :label-left (propertize "Available config options" 'font-lock-face 'agent-shell-section-heading)
      :body (agent-shell--format-available-config-options
             (agent-shell--config-options agent-shell--state))))
   (when (agent-shell--get-available-models agent-shell--state)
@@ -5563,7 +5565,7 @@ overwrites an existing fragment with equivalent content."
      :state agent-shell--state
      :namespace-id "bootstrapping"
      :block-id "available_models"
-     :label-left (propertize "Available models" 'font-lock-face 'font-lock-doc-markup-face)
+     :label-left (propertize "Available models" 'font-lock-face 'agent-shell-section-heading)
      :body (agent-shell--format-available-models
             (agent-shell--get-available-models agent-shell--state))))
   (when (agent-shell--get-available-modes agent-shell--state)
@@ -5571,7 +5573,7 @@ overwrites an existing fragment with equivalent content."
      :state agent-shell--state
      :namespace-id "bootstrapping"
      :block-id "available_modes"
-     :label-left (propertize "Available modes" 'font-lock-face 'font-lock-doc-markup-face)
+     :label-left (propertize "Available modes" 'font-lock-face 'agent-shell-section-heading)
      :body (agent-shell--format-available-modes
             (agent-shell--get-available-modes agent-shell--state)))))
 
@@ -5582,7 +5584,7 @@ overwrites an existing fragment with equivalent content."
    :block-id "starting"
    :label-left (format "%s %s"
                        (agent-shell--make-status-kind-label :status "completed")
-                       (propertize "Starting agent" 'font-lock-face 'font-lock-doc-markup-face))
+                       (propertize "Starting agent" 'font-lock-face 'agent-shell-section-heading))
    :body "\n\nReady"
    :namespace-id "bootstrapping"
    :append t)
@@ -5614,7 +5616,7 @@ overwrites an existing fragment with equivalent content."
                   :block-id "starting"
                   :label-left (format "%s %s"
                                       (agent-shell--make-status-kind-label :status "completed")
-                                      (propertize "Starting agent" 'font-lock-face 'font-lock-doc-markup-face))
+                                      (propertize "Starting agent" 'font-lock-face 'agent-shell-section-heading))
                   :body "\n\nReady"
                   :namespace-id "bootstrapping"
                   :append t)
@@ -5843,7 +5845,7 @@ SESSION-TITLE is an optional display title for the resumed session."
                     :block-id "resumed_session"
                     :label-left (format "%s %s"
                                         (agent-shell--make-status-kind-label :status "completed")
-                                        (propertize "Resuming session" 'font-lock-face 'font-lock-doc-markup-face))
+                                        (propertize "Resuming session" 'font-lock-face 'agent-shell-section-heading))
                     :expanded t
                     :body (or session-title session-id ""))
                    ;; Replay after bootstrapping fragments (e.g. `Available
@@ -5897,7 +5899,7 @@ SESSION-TITLE is an optional display title for the resumed session."
                     :block-id "forked_session"
                     :label-left (format "%s %s"
                                         (agent-shell--make-status-kind-label :status "completed")
-                                        (propertize "Forked session" 'font-lock-face 'font-lock-doc-markup-face))
+                                        (propertize "Forked session" 'font-lock-face 'agent-shell-section-heading))
                     :expanded t
                     :body (or new-session-id ""))
                    (agent-shell--finalize-session-init :on-session-init on-session-init)))
@@ -5986,7 +5988,7 @@ SESSION-TITLE is an optional display title for the resumed session."
                                                    :block-id "resumed_session"
                                                    :label-left (format "%s %s"
                                                                        (agent-shell--make-status-kind-label :status "completed")
-                                                                       (propertize "Resuming session" 'font-lock-face 'font-lock-doc-markup-face))
+                                                                       (propertize "Resuming session" 'font-lock-face 'agent-shell-section-heading))
                                                    :expanded t
                                                    :body (or (map-elt acp-session 'title) ""))
                                                   ;; Replay after bootstrapping fragments (e.g.
@@ -6091,7 +6093,7 @@ Each entry is normalized via `agent-shell--make-mcp-server'."
                 :state state
                 :block-id (format "%s-notices"
                                   (map-elt state :request-count))
-                :label-left (propertize "Notices" 'font-lock-face 'font-lock-doc-markup-face)
+                :label-left (propertize "Notices" 'font-lock-face 'agent-shell-section-heading)
                 :body (or (map-elt acp-error 'message)
                           (map-elt acp-error 'data)
                           "Something is up ¯\\_ (ツ)_/¯")
@@ -6545,7 +6547,7 @@ Each marked span is replaced by its `agent-shell-region-text' value."
                        (agent-shell--update-fragment
                         :state (agent-shell--state)
                         :block-id (format "%s-usage" (map-elt (agent-shell--state) :request-count))
-                        :label-left (propertize "Usage" 'font-lock-face 'font-lock-doc-markup-face)
+                        :label-left (propertize "Usage" 'font-lock-face 'agent-shell-section-heading)
                         :body (agent-shell--format-usage (map-elt (agent-shell--state) :usage) t)
                         :create-new t))
                      (unless success
@@ -6883,7 +6885,7 @@ Uses AGENT-CWD to shorten file paths where necessary."
                       (find-file file))
                     (lambda ()
                       (message "Press RET to open"))
-                    'link)))
+                    'agent-shell-link)))
                files
                "\n\n")))
 
@@ -7243,14 +7245,14 @@ For example:
 
 ╰─"
             (propertize agent-shell-permission-icon
-                        'font-lock-face 'warning)
-            (propertize "Tool Permission" 'font-lock-face 'bold)
+                        'font-lock-face 'agent-shell-warning)
+            (propertize "Tool Permission" 'font-lock-face 'agent-shell-permission-title)
             (propertize agent-shell-permission-icon
-                        'font-lock-face 'warning)
+                        'font-lock-face 'agent-shell-warning)
             (if title
                 (propertize
                  (format "\n\n\n    %s" title)
-                 'font-lock-face 'comint-highlight-input)
+                 'font-lock-face 'agent-shell-input)
               "")
             (if diff-button
                 (concat diff-button " ")
@@ -7776,7 +7778,7 @@ Uses AGENT-CWD to shorten file paths where necessary."
                                                    (message "File not found")))
                                                (lambda ()
                                                  (message "Press RET to open file"))
-                                               'link))
+                                               'agent-shell-link))
                                    (numbered-preview
                                     (when-let* ((buffer (get-file-buffer (map-elt region :file))))
                                       (let ((char-start (map-elt region :char-start))
@@ -8124,8 +8126,8 @@ When DEACTIVATE is non-nil, deactivate region/selection."
 Underlying text keeps the \"> \" so it remains valid markdown;
 the bar is a display-only override.  Yanks strip both the bar
 styling and the leading \"> \" so paste gives plain text."
-  (let* ((bar      (propertize "▌" 'face 'font-lock-comment-face))
-         (wrap     (propertize "▌ " 'face 'font-lock-comment-face))
+  (let* ((bar      (propertize "▌" 'face 'agent-shell-markdown-blockquote))
+         (wrap     (propertize "▌ " 'face 'agent-shell-markdown-blockquote))
          (quoted   (concat "> " (replace-regexp-in-string
                                  (rx "\n") "\n> " text)))
          (rendered (copy-sequence quoted))
@@ -8133,7 +8135,7 @@ styling and the leading \"> \" so paste gives plain text."
     (add-text-properties
      0 (length rendered)
      (list 'wrap-prefix wrap
-           'face 'font-lock-comment-face
+           'face 'agent-shell-markdown-blockquote
            'yank-handler
            (list (lambda (s)
                    (insert
@@ -8309,7 +8311,7 @@ Shows \" ⧉\" when a command prefix is used."
               ((memq agent-shell-header-style '(none nil))))
     (concat (when agent-shell-command-prefix
               (propertize " ⧉ ➤"
-                          'face 'font-lock-constant-face
+                          'face 'agent-shell-container-indicator
                           'help-echo "Running in container"))
             (when-let* ((model-name (or (map-elt (seq-find (lambda (model)
                                                              (string= (map-elt model :model-id)
@@ -8318,12 +8320,12 @@ Shows \" ⧉\" when a command prefix is used."
                                                  :name)
                                         (agent-shell--current-model-id (agent-shell--state)))))
               (concat " " (propertize model-name
-                                      'face 'font-lock-negation-char-face
+                                      'face 'agent-shell-model
                                       'help-echo (concat "Click to open LLM model menu "
                                                          (propertize (key-description (where-is-internal
                                                                                        'agent-shell-set-session-model
                                                                                        agent-shell-mode-map t))
-                                                                     'face 'help-key-binding))
+                                                                     'face 'agent-shell-key-binding))
                                       'mouse-face 'mode-line-highlight
                                       'local-map (let ((map (make-sparse-keymap)))
                                                    (define-key map [mode-line mouse-1]
@@ -8331,12 +8333,12 @@ Shows \" ⧉\" when a command prefix is used."
                                                    map))))
             (when-let* ((thought-level-name (agent-shell-get-thought-level-name (agent-shell--state))))
               (concat " ➤ " (propertize thought-level-name
-                                        'face 'font-lock-keyword-face
+                                        'face 'agent-shell-thought-level
                                         'help-echo (concat "Click to open thought level menu "
                                                            (propertize (key-description (where-is-internal
                                                                                          'agent-shell-set-session-thought-level
                                                                                          agent-shell-mode-map t))
-                                                                       'face 'help-key-binding))
+                                                                       'face 'agent-shell-key-binding))
                                         'mouse-face 'mode-line-highlight
                                         'local-map (let ((map (make-sparse-keymap)))
                                                      (define-key map [mode-line mouse-1]
@@ -8346,12 +8348,12 @@ Shows \" ⧉\" when a command prefix is used."
                                     (agent-shell--current-mode-id (agent-shell--state))
                                     (agent-shell--get-available-modes (agent-shell--state)))))
               (concat " ➤ " (propertize mode-name
-                                        'face 'font-lock-type-face
+                                        'face 'agent-shell-session-mode
                                         'help-echo (concat "Click to open session mode menu "
                                                            (propertize (key-description (where-is-internal
                                                                                          'agent-shell-set-session-mode
                                                                                          agent-shell-mode-map t))
-                                                                       'face 'help-key-binding))
+                                                                       'face 'agent-shell-key-binding))
                                         'mouse-face 'mode-line-highlight
                                         'local-map (let ((map (make-sparse-keymap)))
                                                      (define-key map [mode-line mouse-1]
@@ -8604,10 +8606,10 @@ with ON-SUCCESS function."
                     (propertize (format "%s (id: %s)"
                                         (map-elt mode :name)
                                         (map-elt mode :id))
-                                'font-lock-face 'font-lock-function-name-face)))
+                                'font-lock-face 'agent-shell-list-name)))
             (desc (when (map-elt mode :description)
                     (propertize (map-elt mode :description)
-                                'font-lock-face 'font-lock-comment-face))))
+                                'font-lock-face 'agent-shell-list-description))))
         (if desc
             (concat name "\n" desc)
           name)))
@@ -8622,13 +8624,13 @@ with ON-SUCCESS function."
       (let ((name (concat
                    (when (map-elt model :name)
                      (propertize (map-elt model :name)
-                                 'font-lock-face 'font-lock-function-name-face))
+                                 'font-lock-face 'agent-shell-list-name))
                    (when (map-elt model :model-id)
                      (propertize (format " (id: %s)" (map-elt model :model-id))
-                                 'font-lock-face 'font-lock-function-name-face))))
+                                 'font-lock-face 'agent-shell-list-name))))
             (desc (when (map-elt model :description)
                     (propertize (map-elt model :description)
-                                'font-lock-face 'font-lock-comment-face))))
+                                'font-lock-face 'agent-shell-list-description))))
         (if desc
             (concat name "\n" desc)
           name)))

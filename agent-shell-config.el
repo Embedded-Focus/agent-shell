@@ -36,6 +36,7 @@
 (require 'cl-lib)
 (require 'map)
 (require 'seq)
+(require 'agent-shell-faces)
 
 ;;; Normalization
 
@@ -259,15 +260,15 @@ name, id, current value, and optional description."
       (let ((name (propertize (format "%s (id: %s)"
                                       (map-elt option :name)
                                       (map-elt option :id))
-                              'font-lock-face 'font-lock-function-name-face))
+                              'font-lock-face 'agent-shell-list-name))
             (current (propertize (format "current: %s"
                                          (agent-shell--config-option-value-name
                                           option
                                           (map-elt option :current-value)))
-                                 'font-lock-face 'font-lock-constant-face))
+                                 'font-lock-face 'agent-shell-list-value))
             (desc (when (map-elt option :description)
                     (propertize (map-elt option :description)
-                                'font-lock-face 'font-lock-comment-face))))
+                                'font-lock-face 'agent-shell-list-description))))
         (string-join (delq nil (list name current desc)) "\n")))
     config-options)
    "\n\n"))

@@ -35,6 +35,7 @@
 (require 'flymake)
 (require 'agent-shell-list-edit)
 (require 'agent-shell-markdown)
+(require 'agent-shell-faces)
 (require 'shell-maker)
 (require 'transient)
 
@@ -309,7 +310,7 @@ Optionally set its PROMPT and RESPONSE."
            (propertize (concat prompt "\n\n")
                        'rear-nonsticky t
                        'agent-shell-viewport-prompt t
-                       'face 'font-lock-doc-face)
+                       'face 'agent-shell-viewport-prompt)
          prompt)))
     (when response
       (insert response))
@@ -1282,12 +1283,12 @@ major mode."
          (status (cond
                   ((and (agent-shell-viewport--busy-p)
                         (derived-mode-p 'agent-shell-viewport-edit-mode))
-                   (propertize "Edit (queue)" 'face 'success))
-                  ((agent-shell-viewport--busy-p) (propertize "Busy" 'face 'warning))
+                   (propertize "Edit (queue)" 'face 'agent-shell-viewport-status-edit))
+                  ((agent-shell-viewport--busy-p) (propertize "Busy" 'face 'agent-shell-viewport-status-busy))
                   ((derived-mode-p 'agent-shell-viewport-edit-mode)
-                   (propertize "Edit" 'face 'success))
+                   (propertize "Edit" 'face 'agent-shell-viewport-status-edit))
                   ((derived-mode-p 'agent-shell-viewport-view-mode)
-                   (propertize "View" 'face 'default))))
+                   (propertize "View" 'face 'agent-shell-viewport-status-view))))
          (bindings (cond
                     ((derived-mode-p 'agent-shell-viewport-edit-mode)
                      (list

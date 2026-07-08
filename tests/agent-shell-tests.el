@@ -2922,13 +2922,14 @@ and rejects `new-deferred' and other unknown values."
 (ert-deftest agent-shell--session-column-face-test ()
   "Test `agent-shell--session-column-face' returns correct faces."
   (should (eq (agent-shell--session-column-face 'directory)
-              'font-lock-keyword-face))
+              'agent-shell-session-directory))
+  (should (eq (agent-shell--session-column-face 'title)
+              'agent-shell-session-title))
   (should (eq (agent-shell--session-column-face 'date)
-              'font-lock-comment-face))
+              'agent-shell-session-date))
   (should (eq (agent-shell--session-column-face 'session-id)
-              'font-lock-constant-face))
-  ;; title and unknown have no face
-  (should-not (agent-shell--session-column-face 'title))
+              'agent-shell-session-id))
+  ;; unknown has no face
   (should-not (agent-shell--session-column-face 'unknown)))
 
 (ert-deftest agent-shell--session-choice-label-default-columns-test ()
@@ -3400,7 +3401,7 @@ and rejects `new-deferred' and other unknown values."
         (let ((result (agent-shell--context-usage-indicator)))
           (should result)
           (should (= (length (substring-no-properties result)) 1))
-          (should (eq (get-text-property 0 'face result) 'success)))))))
+          (should (eq (get-text-property 0 'face result) 'agent-shell-success)))))))
 
 (ert-deftest agent-shell--context-usage-indicator-detailed-test ()
   "Test `agent-shell--context-usage-indicator' detailed mode."
@@ -3416,7 +3417,7 @@ and rejects `new-deferred' and other unknown values."
           (should result)
           (should (string-match-p "30k/200k" (substring-no-properties result)))
           (should (string-match-p "15%%" (substring-no-properties result)))
-          (should (eq (get-text-property 0 'face result) 'success)))))))
+          (should (eq (get-text-property 0 'face result) 'agent-shell-success)))))))
 
 (ert-deftest agent-shell--context-usage-indicator-detailed-warning-test ()
   "Test `agent-shell--context-usage-indicator' detailed mode with warning face."
@@ -3429,7 +3430,7 @@ and rejects `new-deferred' and other unknown values."
                (lambda () agent-shell--state)))
       (let ((agent-shell-show-context-usage-indicator 'detailed))
         (let ((result (agent-shell--context-usage-indicator)))
-          (should (eq (get-text-property 0 'face result) 'warning)))))))
+          (should (eq (get-text-property 0 'face result) 'agent-shell-warning)))))))
 
 (ert-deftest agent-shell--context-usage-indicator-nil-test ()
   "Test `agent-shell--context-usage-indicator' returns nil when disabled."

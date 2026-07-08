@@ -30,6 +30,7 @@
 
 (require 'map)
 (require 'seq)
+(require 'agent-shell-faces)
 
 (declare-function agent-shell--add-text-properties "agent-shell")
 
@@ -44,13 +45,13 @@
   "Return alist with :label, :icon, and :face for STATUS string.
 
   (agent-shell--status-config \"completed\")
-  ;; => ((:label . \"done\") (:icon . \"✓\") (:face . success))"
+  ;; => ((:label . \"done\") (:icon . \"✓\") (:face . agent-shell-success))"
   (pcase status
-    ("pending" '((:label . "wait") (:icon . "…") (:face . font-lock-comment-face)))
-    ("in_progress" '((:label . "busy") (:icon . "…") (:face . warning)))
-    ("completed" '((:label . "done") (:icon . "✓") (:face . success)))
-    ("failed" '((:label . "error") (:icon . "✗") (:face . error)))
-    (_ '((:label . "unknown") (:icon . "?") (:face . warning)))))
+    ("pending" '((:label . "wait") (:icon . "…") (:face . agent-shell-pending)))
+    ("in_progress" '((:label . "busy") (:icon . "…") (:face . agent-shell-warning)))
+    ("completed" '((:label . "done") (:icon . "✓") (:face . agent-shell-success)))
+    ("failed" '((:label . "error") (:icon . "✗") (:face . agent-shell-error)))
+    (_ '((:label . "unknown") (:icon . "?") (:face . agent-shell-warning)))))
 
 (defun agent-shell--inverse-label-status-kind-label (status kind)
   "Render STATUS as an inverse-video word label and KIND as boxed text.
