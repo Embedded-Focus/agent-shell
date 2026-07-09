@@ -3755,7 +3755,7 @@ NAVIGATION for navigation style, EXPANDED to show block expanded
 by default, RENDER-BODY-IMAGES to enable inline image rendering in
 body, ABOVE-LAST-PROMPT to land content above the active prompt
 instead of after it (typical for notifications arriving out of
-turn)."
+turn).  Programmatic fragment updates do not enter undo history."
   (when label-right
     (setq label-right (string-trim label-right)))
   ;; Convert non-standard multiline single-backtick code spans to fenced
@@ -3783,7 +3783,8 @@ turn)."
               ((with-current-buffer viewport-buffer
                  (derived-mode-p 'agent-shell-viewport-view-mode))))
     (with-current-buffer viewport-buffer
-      (let ((inhibit-read-only t)
+      (let ((buffer-undo-list t)
+            (inhibit-read-only t)
             (auto-scroll (shell-maker--should-auto-scroll-p)))
         (when-let* ((range (agent-shell-ui-update-fragment
                             (agent-shell-ui-make-fragment-model
@@ -3831,7 +3832,8 @@ turn)."
                  (equal (current-buffer)
                         (map-elt state :buffer)))
       (error "Editing the wrong buffer: %s" (current-buffer)))
-    (let* ((window (get-buffer-window (current-buffer)))
+    (let* ((buffer-undo-list t)
+           (window (get-buffer-window (current-buffer)))
            (auto-scroll (eobp))
            (saved-point (point))
            (saved-mark (mark t))
