@@ -755,6 +755,22 @@ For example, the buffer \"see ![logo](logo.png)\" becomes
          (t
           (let* ((alt (buffer-substring-no-properties
                        (match-beginning 1) (match-end 1)))
+                 ;; The placeholder that replaces the markup must carry the
+                 ;; surrounding text's properties -- the shell tags the whole
+                 ;; body run with `agent-shell-ui-section', read-only, and an
+                 ;; invisibility state, and the fragment layer locates the body
+                 ;; by that contiguous run.  Reinserting a bare string (as
+                 ;; `buffer-substring-no-properties' would give) punches a hole
+                 ;; in the run, so the next streaming chunk mis-locates the body
+                 ;; and hides the text after the image.  Mirror
+                 ;; `--replace-links': keep the alt's properties for a non-empty
+                 ;; alt, and inherit the markup's own properties for the empty
+                 ;; case (space placeholder).
+                 (placeholder (if (string-empty-p alt)
+                                  (apply #'propertize " "
+                                         (text-properties-at markup-start))
+                                (buffer-substring (match-beginning 1)
+                                                  (match-end 1))))
                  (url (buffer-substring-no-properties
                        (match-beginning 2) (match-end 2)))
                  (path (agent-shell-markdown--resolve-image-url
@@ -765,10 +781,7 @@ For example, the buffer \"see ![logo](logo.png)\" becomes
                    (display-graphic-p))
               (let ((image (create-image
                             path nil nil
-                            :max-width (agent-shell-markdown--image-max-width)))
-                    (placeholder (if (string-empty-p alt) " " alt))
-                    (line-prefix (get-text-property markup-start 'line-prefix))
-                    (wrap-prefix (get-text-property markup-start 'wrap-prefix)))
+                            :max-width (agent-shell-markdown--image-max-width))))
                 (image-flush image)
                 (delete-region markup-start markup-end)
                 (goto-char markup-start)
@@ -779,26 +792,25 @@ For example, the buffer \"see ![logo](logo.png)\" becomes
                                      (agent-shell-markdown--make-ret-binding-map
                                       (lambda () (interactive)
                                         (find-file path))))
-                  (put-text-property markup-start end 'mouse-face 'highlight)
-                  (when line-prefix
-                    (put-text-property markup-start end 'line-prefix line-prefix))
-                  (when wrap-prefix
-                    (put-text-property markup-start end 'wrap-prefix wrap-prefix)))))
+                  (put-text-property markup-start end 'mouse-face 'highlight))))
              ;; Remote image we couldn't show inline (no cache configured, the
              ;; download failed, or a non-graphical display): render a link
              ;; that opens the url, rather than leaving raw `![alt](url)' text.
              ((string-match-p "\\`https?://" url)
-              (delete-region markup-start markup-end)
-              (goto-char markup-start)
-              (let* ((label (if (string-empty-p alt) url alt))
-                     (end (+ markup-start (length label))))
+              (let ((label (if (string-empty-p alt)
+                               (apply #'propertize url
+                                      (text-properties-at markup-start))
+                             placeholder)))
+                (delete-region markup-start markup-end)
+                (goto-char markup-start)
                 (insert label)
-                (add-face-text-property markup-start end 'agent-shell-markdown-link)
-                (put-text-property markup-start end 'keymap
-                                   (agent-shell-markdown--make-ret-binding-map
-                                    (lambda () (interactive)
-                                      (agent-shell-markdown--open-link url))))
-                (put-text-property markup-start end 'mouse-face 'highlight)))))))))))
+                (let ((end (+ markup-start (length label))))
+                  (add-face-text-property markup-start end 'agent-shell-markdown-link)
+                  (put-text-property markup-start end 'keymap
+                                     (agent-shell-markdown--make-ret-binding-map
+                                      (lambda () (interactive)
+                                        (agent-shell-markdown--open-link url))))
+                  (put-text-property markup-start end 'mouse-face 'highlight))))))))))))
 
 (cl-defun agent-shell-markdown--replace-image-file-paths (&key avoid-ranges)
   "Render bare image-path lines as displayed images.
