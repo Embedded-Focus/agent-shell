@@ -616,6 +616,43 @@ after" nil)))))
 │ quite long  │ cell also   │
 │ content     │ long enough │")))))
 
+(ert-deftest agent-shell-markdown-convert-table-output-wraps-cjk-cell-without-spaces ()
+  ;; A whitespace-free CJK cell must still wrap: CJK characters are
+  ;; individually breakable, while ASCII words (here \"Cage\", \"4\",
+  ;; \"33\", \"20\") stay intact.
+  (let ((agent-shell-markdown-table-max-width-fraction 1.0))
+    (cl-letf (((symbol-function 'agent-shell-markdown--display-width)
+               (lambda () 36)))
+      (should (equal (substring-no-properties
+                      (agent-shell-markdown-convert
+                       "| 作曲家 | 主な特徴 |
+|---|---|
+| Cage | 「4分33秒」に代表される偶然性の音楽の導入で20世紀音楽の概念を根本から問い直した |"))
+                     "│ 作曲 │ 主な特徴                 │
+│ 家   │                          │
+├──────┼──────────────────────────┤
+│ Cage │ 「4分33秒」に代表される  │
+│      │ 偶然性の音楽の導入で20世 │
+│      │ 紀音楽の概念を根本から問 │
+│      │ い直した                 │")))))
+
+(ert-deftest agent-shell-markdown-table-longest-word-breaks-at-cjk-chars ()
+  ;; Words are unbreakable; line-breakable (category `|') characters
+  ;; contribute their own char-width.  Emoji sequences are not
+  ;; breakable, so a modifier stays attached to its base.
+  (should (= 0 (agent-shell-markdown--table-longest-word :str nil)))
+  (should (= 0 (agent-shell-markdown--table-longest-word :str "")))
+  (should (= 3 (agent-shell-markdown--table-longest-word :str "foo ba")))
+  (should (= 2 (agent-shell-markdown--table-longest-word :str "現代音楽")))
+  (should (= 3 (agent-shell-markdown--table-longest-word :str "日本のfoo語")))
+  (should (= 4 (agent-shell-markdown--table-longest-word :str "👍🏽"))))
+
+(ert-deftest agent-shell-markdown-table-wrap-text-breaks-after-cjk-not-inside-ascii ()
+  ;; Wrapping breaks after CJK characters rather than inside an
+  ;; embedded ASCII word.
+  (should (equal (agent-shell-markdown--table-wrap-text "日本のfoo語" 3)
+                 '("日" "本" "の" "foo" "語"))))
+
 (ert-deftest agent-shell-markdown-mirrors-face-to-font-lock-face ()
   ;; Faces are mirrored to `font-lock-face' so our styling survives
   ;; `font-lock-mode' re-fontification in comint / shell-maker buffers.
