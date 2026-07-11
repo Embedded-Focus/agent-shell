@@ -1510,19 +1510,39 @@ pipes between rows."
     (string-width str)))
 
 (cl-defun agent-shell-markdown--table-longest-word (&key str window)
-  "Return display width of longest word in STR.
-Uses `agent-shell-markdown--table-display-width' so non-ASCII words
-get accurate measurement when WINDOW is given."
+  "Return display width of the longest unbreakable unit in STR.
+
+Runs of non-breakable characters form unbreakable words, measured
+via `agent-shell-markdown--table-display-width' (pixel-accurate
+when WINDOW is given).  Line-breakable characters (category `|':
+CJK ideographs, kana, Hangul, etc.) can wrap anywhere, so each
+contributes only its own `char-width'.  Otherwise a
+whitespace-free CJK sentence would count as one word and pin its
+column at the full sentence width.
+
+For example, \"foo bar\" yields 3 (\"foo\"), \"日本語\" yields 2,
+and \"日本のfoo語\" yields 3 (\"foo\")."
   (if (or (null str) (string-empty-p str))
       0
-    (let ((words (split-string str "[ \t\n]+" t)))
-      (if words
-          (apply #'max
-                 (mapcar (lambda (w)
-                           (agent-shell-markdown--table-display-width
-                            :str w :window window))
-                         words))
-        0))))
+    (let ((len (length str))
+          (longest 0)
+          (word-start nil))
+      (dotimes (i (1+ len))
+        (let* ((ch (and (< i len) (seq-elt str i)))
+               (separator (or (null ch) (memq ch '(?\s ?\t ?\n))))
+               (breakable (and (not separator)
+                               (aref (char-category-set ch) ?|))))
+          (when (and word-start (or separator breakable))
+            (setq longest (max longest
+                               (agent-shell-markdown--table-display-width
+                                :str (substring str word-start i)
+                                :window window)))
+            (setq word-start nil))
+          (cond
+           (breakable (setq longest (max longest (char-width ch))))
+           ((and (not separator) (not word-start))
+            (setq word-start i)))))
+      longest)))
 
 (defun agent-shell-markdown--table-total-width (widths)
   "Return total rendered width for a table with column WIDTHS.
@@ -1626,9 +1646,21 @@ rendered width rather than the unstyled char count."
                     text i window))))
     sum))
 
+(defun agent-shell-markdown--table-break-after-p (text i)
+  "Return non-nil when a wrapped line may break after index I in TEXT.
+I + 1 must be a valid index into TEXT.  Breaks are allowed after a
+line-breakable character (category `|': CJK ideographs, kana,
+Hangul, etc.), unless the next character is zero-width (combining
+character, variation selector, ZWJ) and must stay attached."
+  (and (aref (char-category-set (seq-elt text i)) ?|)
+       (> (char-width (seq-elt text (1+ i))) 0)))
+
 (cl-defun agent-shell-markdown--table-wrap-text (text width &optional window)
   "Wrap TEXT to fit within WIDTH, returning a list of lines.
 Preserves text properties across wrapped lines.
+
+Breaks after whitespace or a line-breakable (CJK) character; a
+run with no break point splits at the width limit.
 
 Uses the VS-16-aware width helper so that emoji presentation
 sequences (`⚠️') count as their actual rendered width (2 cells)
@@ -1674,14 +1706,19 @@ width exceeds the column budget, drifting the right pipe."
           ;; first char already exceeds WIDTH (e.g. wide glyph).
           (when (= end-pos pos)
             (setq end-pos (1+ pos)))
-          ;; Try to break at the last whitespace within [pos, end-pos).
+          ;; Try to break at the last clean break point within
+          ;; [pos, end-pos): after whitespace, or after a
+          ;; line-breakable (CJK) character.
           (let ((break-pos end-pos))
             (when (< end-pos len)
               (let ((scan (1- end-pos)))
-                (while (and (> scan pos)
-                            (not (memq (seq-elt text scan) '(?\s ?\t))))
+                (while (and (>= scan pos)
+                            (not (and (> scan pos)
+                                      (memq (seq-elt text scan) '(?\s ?\t))))
+                            (not (agent-shell-markdown--table-break-after-p
+                                  text scan)))
                   (setq scan (1- scan)))
-                (when (> scan pos)
+                (when (>= scan pos)
                   (setq break-pos (1+ scan)))))
             (push (string-trim-right (substring text pos break-pos)) lines)
             (setq pos break-pos)
