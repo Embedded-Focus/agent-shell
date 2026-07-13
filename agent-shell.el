@@ -3679,7 +3679,8 @@ variable (see makunbound)"))
                                                     (when (or (eq status 'ended)
                                                               (get-buffer-window shell-buffer t))
                                                       (with-current-buffer shell-buffer
-                                                        (agent-shell--update-header-and-mode-line)))
+                                                        (agent-shell--update-header-and-mode-line
+                                                         :cache-enabled (eq status 'busy))))
                                                     ;; 'ended is the final tick; render even
                                                     ;; if off-screen to ensure animation is hidden.
                                                     (when-let* ((using-viewports agent-shell-prefer-viewport-interaction)
@@ -4247,6 +4248,14 @@ Returns:
 
 A buffer-local hash table mapping cache keys to header strings.")
 
+(defvar-local agent-shell--header-last-model nil
+  "Header model from the last full header update.
+
+Reused by heartbeat ticks, refreshing only the animated frame, so the
+model (project lookup, context usage, model/mode names, key bindings,
+frame metrics, ...) is not rebuilt on every beat.")
+
+
 (defun agent-shell--session-id-indicator ()
   "Return a propertized session ID string, or nil if unavailable or disabled."
   (when-let* ((agent-shell-show-session-id)
@@ -4287,9 +4296,13 @@ to fall back to black."
         (apply #'color-rgb-to-hex (append rgb '(2)))
       "#ffffff")))
 
-(cl-defun agent-shell--make-header-model (state &key position status bindings)
+(cl-defun agent-shell--make-header-model (state &key position status bindings
+                                                model-binding mode-binding thought-level-binding)
   "Create a header model alist from STATE, POSITION, STATUS, and BINDINGS.
-The model contains all inputs needed to render the graphical header."
+The model contains all inputs needed to render the header, so
+MODEL-BINDING, MODE-BINDING and THOUGHT-LEVEL-BINDING (key description
+strings shown in the model, session mode and thought level help-echo
+tooltips) are stored in it too."
   `((:buffer-name . ,(map-nested-elt state '(:agent-config :buffer-name)))
     (:icon-name . ,(map-nested-elt state '(:agent-config :icon-name)))
     (:model-id . ,(map-nested-elt state '(:session :model-id)))
@@ -4314,7 +4327,10 @@ The model contains all inputs needed to render the graphical header."
     (:busy-indicator-frame . ,(agent-shell--busy-indicator-frame))
     (:position . ,position)
     (:status . ,status)
-    (:bindings . ,bindings)))
+    (:bindings . ,bindings)
+    (:model-binding . ,model-binding)
+    (:mode-binding . ,mode-binding)
+    (:thought-level-binding . ,thought-level-binding)))
 
 (defun agent-shell--header-cache-key (model)
   "Generate a cache key from header MODEL.
@@ -4346,7 +4362,41 @@ menu command.
 When provided, included in help-echo tooltips."
   (unless state
     (error "STATE is required"))
-  (let* ((header-model (agent-shell--make-header-model state :position position :status status :bindings bindings))
+  (agent-shell--render-header-model
+   (agent-shell--make-header-model state :position position :status status :bindings bindings
+                                   :model-binding model-binding
+                                   :mode-binding mode-binding
+                                   :thought-level-binding thought-level-binding)))
+
+(defun agent-shell--render-header-model (header-model)
+  "Render HEADER-MODEL to a header string, caching the result.
+
+HEADER-MODEL is an alist produced by `agent-shell--make-header-model',
+holding every input needed to render, including the menu key bindings.
+
+Rendering builds the whole propertized header string, including three
+clickable menu keymaps, so it is expensive relative to a heartbeat tick.
+The result is cached in `agent-shell--header-cache' keyed on the model.
+During busy animation only the frame glyph varies, so ticks cycle through
+a small fixed set of keys and become cache hits after the first animation
+cycle.  The cache is cleared on every full header update (see
+`agent-shell--update-header-and-mode-line'), which bounds its size and
+keeps entries fresh."
+  (unless (memq agent-shell-header-style '(none nil))
+    (unless agent-shell--header-cache
+      (setq agent-shell--header-cache (make-hash-table :test #'equal)))
+    (let ((cache-key (agent-shell--header-cache-key header-model)))
+      (or (map-elt agent-shell--header-cache cache-key)
+          (let ((header (agent-shell--render-header-model-uncached header-model)))
+            (map-put! agent-shell--header-cache cache-key header)
+            header)))))
+
+(defun agent-shell--render-header-model-uncached (header-model)
+  "Render HEADER-MODEL to a header string without caching."
+  (let* ((bindings (map-elt header-model :bindings))
+         (model-binding (map-elt header-model :model-binding))
+         (mode-binding (map-elt header-model :mode-binding))
+         (thought-level-binding (map-elt header-model :thought-level-binding))
          (help-binding (seq-find (lambda (b)
                                    (equal (map-elt b :description) "Help"))
                                  (map-elt header-model :bindings)))
@@ -4436,212 +4486,206 @@ When provided, included in help-echo tooltips."
            ;; |      | Bottom text line
            ;; +------+
            ;; Bindings row (optional, last row)
-           (let* ((cache-key (agent-shell--header-cache-key header-model))
-                  (cached (progn
-                            (unless agent-shell--header-cache
-                              (setq agent-shell--header-cache (make-hash-table :test #'equal)))
-                            (map-elt agent-shell--header-cache cache-key))))
-             (or cached
-                 (let* ((char-height (map-elt header-model :font-height))
-                        (font-size (map-elt header-model :font-size))
-                        (has-bindings bindings)
-                        (image-height (* 3 char-height))
-                        (image-width image-height)
-                        (text-height char-height)
-                        (top-padding-height (/ font-size 2))
-                        (bottom-padding-height (if has-bindings (+ text-height top-padding-height) top-padding-height))
-                        ;; Match the natural inter-line stride between top and
-                        ;; bottom text rows so the bindings row sits the same
-                        ;; vertical distance below the bottom row.
-                        (row-spacing (if has-bindings (- char-height font-size) 0))
-                        (total-height (+ image-height row-spacing top-padding-height bottom-padding-height))
-                        ;; icon position
-                        (icon-x 6)
-                        (icon-y top-padding-height)
-                        ;; text position right of the icon area
-                        (icon-text-x (+ icon-x image-width 10))
-                        (icon-text-y (+ icon-y char-height (/ (- char-height font-size) 2)))
-                        ;; Bindings positioned below the icon area
-                        (bindings-x icon-x)
-                        (bindings-y (+ image-height font-size row-spacing))
-                        (svg (svg-create (map-elt header-model :frame-width) total-height))
-                        (icon-filename
-                         (if (map-elt header-model :icon-name)
-                             (agent-shell--fetch-agent-icon (map-elt header-model :icon-name))
-                           (agent-shell--make-agent-fallback-icon (map-elt header-model :buffer-name) 100)))
-                        (image-type (or (agent-shell--image-type-to-mime icon-filename)
-                                        "image/png")))
-                   ;; Icon
-                   (when (and icon-filename image-type)
-                     (svg-embed svg icon-filename
-                                image-type nil
-                                :x icon-x :y icon-y :width image-width :height image-height))
-                   ;; Top text line
-                   (svg--append svg (let ((text-node (dom-node 'text
-                                                               `((x . ,icon-text-x)
-                                                                 (y . ,icon-text-y)
-                                                                 (font-size . ,font-size)))))
-                                      ;; Agent name
+           ;; Caching is handled by `agent-shell--render-header-model'.
+           (let* ((char-height (map-elt header-model :font-height))
+                  (font-size (map-elt header-model :font-size))
+                  (has-bindings bindings)
+                  (image-height (* 3 char-height))
+                  (image-width image-height)
+                  (text-height char-height)
+                  (top-padding-height (/ font-size 2))
+                  (bottom-padding-height (if has-bindings (+ text-height top-padding-height) top-padding-height))
+                  ;; Match the natural inter-line stride between top and
+                  ;; bottom text rows so the bindings row sits the same
+                  ;; vertical distance below the bottom row.
+                  (row-spacing (if has-bindings (- char-height font-size) 0))
+                  (total-height (+ image-height row-spacing top-padding-height bottom-padding-height))
+                  ;; icon position
+                  (icon-x 6)
+                  (icon-y top-padding-height)
+                  ;; text position right of the icon area
+                  (icon-text-x (+ icon-x image-width 10))
+                  (icon-text-y (+ icon-y char-height (/ (- char-height font-size) 2)))
+                  ;; Bindings positioned below the icon area
+                  (bindings-x icon-x)
+                  (bindings-y (+ image-height font-size row-spacing))
+                  (svg (svg-create (map-elt header-model :frame-width) total-height))
+                  (icon-filename
+                   (if (map-elt header-model :icon-name)
+                       (agent-shell--fetch-agent-icon (map-elt header-model :icon-name))
+                     (agent-shell--make-agent-fallback-icon (map-elt header-model :buffer-name) 100)))
+                  (image-type (or (agent-shell--image-type-to-mime icon-filename)
+                                  "image/png")))
+             ;; Icon
+             (when (and icon-filename image-type)
+               (svg-embed svg icon-filename
+                          image-type nil
+                          :x icon-x :y icon-y :width image-width :height image-height))
+             ;; Top text line
+             (svg--append svg (let ((text-node (dom-node 'text
+                                                         `((x . ,icon-text-x)
+                                                           (y . ,icon-text-y)
+                                                           (font-size . ,font-size)))))
+                                ;; Agent name
+                                (dom-append-child text-node
+                                                  (dom-node 'tspan
+                                                            `((fill . ,(agent-shell--svg-fill-color 'agent-shell-buffer-name)))
+                                                            (map-elt header-model :buffer-name)))
+                                ;; Model name (optional)
+                                (when (map-elt header-model :model-name)
+                                  ;; Add separator arrow
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                (dx . "8"))
+                                                              "➤"))
+                                  ;; Add model name
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'agent-shell-model))
+                                                                (dx . "8"))
+                                                              (map-elt header-model :model-name))))
+                                ;; Thought level (optional)
+                                (when (map-elt header-model :thought-level-id)
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                (dx . "8"))
+                                                              "➤"))
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'agent-shell-thought-level))
+                                                                (dx . "8"))
+                                                              (map-elt header-model :thought-level-name))))
+                                ;; Session mode (optional)
+                                (when (map-elt header-model :mode-name)
+                                  ;; Add separator arrow
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                (dx . "8"))
+                                                              "➤"))
+                                  ;; Add session mode text
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-mode))
+                                                                (dx . "8"))
+                                                              (map-elt header-model :mode-name))))
+                                (when (map-elt header-model :context-indicator)
+                                  (when (> (length (map-elt header-model :context-indicator)) 1)
+                                    ;; Add separator arrow
+                                    (dom-append-child text-node
+                                                      (dom-node 'tspan
+                                                                `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                  (dx . "8"))
+                                                                "➤")))
+                                  ;; Add context indicator
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color
+                                                                          (or (get-text-property 0 'face (map-elt header-model :context-indicator))
+                                                                              'default)))
+                                                                (dx . "8"))
+                                                              (format-mode-line (map-elt header-model :context-indicator)))))
+                                text-node))
+             ;; Bottom text line
+             (svg--append svg (let ((text-node (dom-node 'text
+                                                         `((x . ,icon-text-x)
+                                                           (y . ,(+ icon-text-y text-height (- char-height font-size)))
+                                                           (font-size . ,font-size)))))
+                                ;; Position (optional, before project)
+                                (when (map-elt header-model :position)
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color
+                                                                          (or (get-text-property 0 'face (map-elt header-model :position))
+                                                                              'default))))
+                                                              (substring-no-properties (map-elt header-model :position))))
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                (dx . "8"))
+                                                              "➤")))
+                                ;; Directory path
+                                (dom-append-child text-node
+                                                  (dom-node 'tspan
+                                                            `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-directory))
+                                                              ,@(when (map-elt header-model :position) '((dx . "8"))))
+                                                            (map-elt header-model :project-name)))
+                                ;; Session ID (optional)
+                                (when (map-elt header-model :session-id)
+                                  ;; Separator arrow (default foreground)
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                (dx . "8"))
+                                                              "➤"))
+                                  ;; Session ID text
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-id))
+                                                                (dx . "8"))
+                                                              (substring-no-properties (map-elt header-model :session-id)))))
+                                ;; Status (optional)
+                                (when (map-elt header-model :status)
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                (dx . "8"))
+                                                              "➤"))
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color
+                                                                          (or (get-text-property 0 'face (map-elt header-model :status))
+                                                                              'default)))
+                                                                (dx . "8"))
+                                                              (substring-no-properties (map-elt header-model :status)))))
+                                (when (map-elt header-model :busy-indicator-frame)
+                                  (dom-append-child text-node
+                                                    (dom-node 'tspan
+                                                              `((fill . ,(agent-shell--svg-fill-color 'default))
+                                                                (dx . "8"))
+                                                              (map-elt header-model :busy-indicator-frame))))
+                                text-node))
+             ;; Bindings row (last row if bindings present)
+             (when bindings
+               (svg--append svg (let ((text-node (dom-node 'text
+                                                           `((x . ,bindings-x)
+                                                             (y . ,bindings-y)
+                                                             (font-size . ,font-size))))
+                                      (first t))
+                                  (dolist (binding bindings)
+                                    (when (map-elt binding :description)
+                                      ;; Add key (XML-escape angle brackets)
                                       (dom-append-child text-node
                                                         (dom-node 'tspan
-                                                                  `((fill . ,(agent-shell--svg-fill-color 'agent-shell-buffer-name)))
-                                                                  (map-elt header-model :buffer-name)))
-                                      ;; Model name (optional)
-                                      (when (map-elt header-model :model-name)
-                                        ;; Add separator arrow
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                      (dx . "8"))
-                                                                    "➤"))
-                                        ;; Add model name
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-model))
-                                                                      (dx . "8"))
-                                                                    (map-elt header-model :model-name))))
-                                      ;; Thought level (optional)
-                                      (when (map-elt header-model :thought-level-id)
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                      (dx . "8"))
-                                                                    "➤"))
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-thought-level))
-                                                                      (dx . "8"))
-                                                                    (map-elt header-model :thought-level-name))))
-                                      ;; Session mode (optional)
-                                      (when (map-elt header-model :mode-name)
-                                        ;; Add separator arrow
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                      (dx . "8"))
-                                                                    "➤"))
-                                        ;; Add session mode text
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-mode))
-                                                                      (dx . "8"))
-                                                                    (map-elt header-model :mode-name))))
-                                      (when (map-elt header-model :context-indicator)
-                                        (when (> (length (map-elt header-model :context-indicator)) 1)
-                                          ;; Add separator arrow
-                                          (dom-append-child text-node
-                                                            (dom-node 'tspan
-                                                                      `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                        (dx . "8"))
-                                                                      "➤")))
-                                        ;; Add context indicator
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color
-                                                                                (or (get-text-property 0 'face (map-elt header-model :context-indicator))
-                                                                                    'default)))
-                                                                      (dx . "8"))
-                                                                    (format-mode-line (map-elt header-model :context-indicator)))))
-                                      text-node))
-                   ;; Bottom text line
-                   (svg--append svg (let ((text-node (dom-node 'text
-                                                               `((x . ,icon-text-x)
-                                                                 (y . ,(+ icon-text-y text-height (- char-height font-size)))
-                                                                 (font-size . ,font-size)))))
-                                      ;; Position (optional, before project)
-                                      (when (map-elt header-model :position)
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color
-                                                                                (or (get-text-property 0 'face (map-elt header-model :position))
-                                                                                    'default))))
-                                                                    (substring-no-properties (map-elt header-model :position))))
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                      (dx . "8"))
-                                                                    "➤")))
-                                      ;; Directory path
+                                                                  `((fill . ,(agent-shell--svg-fill-color 'agent-shell-key-binding))
+                                                                    ,@(unless first '((dx . "8"))))
+                                                                  (replace-regexp-in-string
+                                                                   "<" "&lt;"
+                                                                   (replace-regexp-in-string
+                                                                    ">" "&gt;"
+                                                                    (map-elt binding :key)))))
+                                      (setq first nil)
+                                      ;; Add space and description
                                       (dom-append-child text-node
                                                         (dom-node 'tspan
-                                                                  `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-directory))
-                                                                    ,@(when (map-elt header-model :position) '((dx . "8"))))
-                                                                  (map-elt header-model :project-name)))
-                                      ;; Session ID (optional)
-                                      (when (map-elt header-model :session-id)
-                                        ;; Separator arrow (default foreground)
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                      (dx . "8"))
-                                                                    "➤"))
-                                        ;; Session ID text
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'agent-shell-session-id))
-                                                                      (dx . "8"))
-                                                                    (substring-no-properties (map-elt header-model :session-id)))))
-                                      ;; Status (optional)
-                                      (when (map-elt header-model :status)
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                      (dx . "8"))
-                                                                    "➤"))
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color
-                                                                                (or (get-text-property 0 'face (map-elt header-model :status))
-                                                                                    'default)))
-                                                                      (dx . "8"))
-                                                                    (substring-no-properties (map-elt header-model :status)))))
-                                      (when (map-elt header-model :busy-indicator-frame)
-                                        (dom-append-child text-node
-                                                          (dom-node 'tspan
-                                                                    `((fill . ,(agent-shell--svg-fill-color 'default))
-                                                                      (dx . "8"))
-                                                                    (map-elt header-model :busy-indicator-frame))))
-                                      text-node))
-                   ;; Bindings row (last row if bindings present)
-                   (when bindings
-                     (svg--append svg (let ((text-node (dom-node 'text
-                                                                 `((x . ,bindings-x)
-                                                                   (y . ,bindings-y)
-                                                                   (font-size . ,font-size))))
-                                            (first t))
-                                        (dolist (binding bindings)
-                                          (when (map-elt binding :description)
-                                            ;; Add key (XML-escape angle brackets)
-                                            (dom-append-child text-node
-                                                              (dom-node 'tspan
-                                                                        `((fill . ,(agent-shell--svg-fill-color 'agent-shell-key-binding))
-                                                                          ,@(unless first '((dx . "8"))))
-                                                                        (replace-regexp-in-string
-                                                                         "<" "&lt;"
-                                                                         (replace-regexp-in-string
-                                                                          ">" "&gt;"
-                                                                          (map-elt binding :key)))))
-                                            (setq first nil)
-                                            ;; Add space and description
-                                            (dom-append-child text-node
-                                                              (dom-node 'tspan
-                                                                        `((fill . ,(agent-shell--svg-fill-color 'font-lock-comment-face))
-                                                                          (dx . "8"))
-                                                                        (map-elt binding :description)))))
-                                        text-node)))
-                   (let ((result (propertize
-                                  (format " %s" (with-temp-buffer
-                                                  (svg-insert-image svg)
-                                                  (buffer-string)))
-                                  'help-echo "Click to open settings menu"
-                                  'mouse-face 'mode-line-highlight
-                                  'local-map (let ((map (make-sparse-keymap)))
-                                               (define-key map [header-line down-mouse-1] #'ignore)
-                                               (define-key map [header-line mouse-1]
-                                                           (agent-shell--mode-line-combined-menu))
-                                               map))))
-                     (map-put! agent-shell--header-cache cache-key result)
-                     result))))
+                                                                  `((fill . ,(agent-shell--svg-fill-color 'font-lock-comment-face))
+                                                                    (dx . "8"))
+                                                                  (map-elt binding :description)))))
+                                  text-node)))
+             (let ((result (propertize
+                            (format " %s" (with-temp-buffer
+                                            (svg-insert-image svg)
+                                            (buffer-string)))
+                            'help-echo "Click to open settings menu"
+                            'mouse-face 'mode-line-highlight
+                            'local-map (let ((map (make-sparse-keymap)))
+                                         (define-key map [header-line down-mouse-1] #'ignore)
+                                         (define-key map [header-line mouse-1]
+                                                     (agent-shell--mode-line-combined-menu))
+                                         map))))
+               result))
          text-header))
       (_ text-header))))
 
@@ -4654,23 +4698,45 @@ Returns a MIME type like \"image/png\" or \"image/jpeg\"."
       ('svg "image/svg+xml")
       (_ (format "image/%s" type)))))
 
-(defun agent-shell--update-header-and-mode-line ()
-  "Update header and mode line based on `agent-shell-header-style'."
+(cl-defun agent-shell--update-header-and-mode-line (&key cache-enabled)
+  "Update header and mode line based on `agent-shell-header-style'.
+
+With CACHE-ENABLED non-nil (used by heartbeat ticks), reuse the model
+from the last full update and refresh only the animated busy frame,
+avoiding a full rebuild.  With CACHE-ENABLED nil (a full update), rebuild
+everything and clear the render cache."
   (unless (derived-mode-p 'agent-shell-mode)
     (error "Not in a shell"))
+  ;; A full update means some non-animation input changed, so drop the
+  ;; render cache.  This bounds its size to the animation's frame count
+  ;; and keeps entries fresh.  Cached (busy tick) updates keep it.
+  (unless cache-enabled
+    (setq agent-shell--header-cache nil))
   (setq header-line-format
-        (agent-shell--make-header (agent-shell--state)
-                                  :model-binding (key-description (where-is-internal
-                                                                   'agent-shell-set-session-model
-                                                                   agent-shell-mode-map t))
-                                  :mode-binding (key-description (where-is-internal
-                                                                  'agent-shell-set-session-mode
-                                                                  agent-shell-mode-map t))
-                                  :thought-level-binding (key-description (where-is-internal
-                                                                           'agent-shell-set-session-thought-level
-                                                                           agent-shell-mode-map t))))
+        (agent-shell--render-header-model
+         (if (and cache-enabled agent-shell--header-last-model)
+             (agent-shell--header-model-refresh-frame agent-shell--header-last-model)
+           (setq agent-shell--header-last-model
+                 (agent-shell--make-header-model
+                  (agent-shell--state)
+                  :model-binding (key-description (where-is-internal
+                                                   'agent-shell-set-session-model
+                                                   agent-shell-mode-map t))
+                  :mode-binding (key-description (where-is-internal
+                                                  'agent-shell-set-session-mode
+                                                  agent-shell-mode-map t))
+                  :thought-level-binding (key-description (where-is-internal
+                                                           'agent-shell-set-session-thought-level
+                                                           agent-shell-mode-map t)))))))
   (when (memq agent-shell-header-style '(text none nil))
     (force-mode-line-update)))
+
+(defun agent-shell--header-model-refresh-frame (model)
+  "Return a copy of MODEL with its busy-indicator frame refreshed.
+Copies so the cached MODEL is left untouched."
+  (let ((copy (copy-alist model)))
+    (map-put! copy :busy-indicator-frame (agent-shell--busy-indicator-frame))
+    copy))
 
 (defun agent-shell--fetch-agent-icon (icon-name)
   "Download icon with ICON-NAME from GitHub, only if it exists, and save as binary.
