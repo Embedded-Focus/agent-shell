@@ -489,7 +489,7 @@ For an OpenAI-compatible provider (for example OpenRouter), pass the API key and
 (setq agent-shell-qwen-environment
       (agent-shell-make-environment-variables
        "OPENAI_BASE_URL" "https://openrouter.ai/api/v1"
-       "OPENAI_MODEL" "x-ai/grok-code-fast-1"))
+       "OPENAI_MODEL" "x-ai/grok-4.3"))
 #+end_src
 
 *** Cursor

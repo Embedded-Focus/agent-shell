@@ -73,7 +73,7 @@ API key and set the base URL and model via `agent-shell-qwen-environment':
   (setq agent-shell-qwen-environment
         (agent-shell-make-environment-variables
          \"OPENAI_BASE_URL\" \"https://openrouter.ai/api/v1\"
-         \"OPENAI_MODEL\" \"x-ai/grok-code-fast-1\"))"
+         \"OPENAI_MODEL\" \"x-ai/grok-4.3\"))"
   :type 'alist
   :group 'agent-shell)
 
