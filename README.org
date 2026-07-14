@@ -474,6 +474,24 @@ For OAuth login-based authentication:
       (agent-shell-qwen-make-authentication :login t))
 #+end_src
 
+For an OpenAI-compatible provider (for example OpenRouter), pass the API key and set the base URL and model via =agent-shell-qwen-environment=:
+
+#+begin_src emacs-lisp
+;; With string
+(setq agent-shell-qwen-authentication
+      (agent-shell-qwen-make-authentication :openai-api-key "your-openai-api-key-here"))
+
+;; With function
+(setq agent-shell-qwen-authentication
+      (agent-shell-qwen-make-authentication
+       :openai-api-key (lambda () (auth-source-pass-get 'secret "openrouter-api-key"))))
+
+(setq agent-shell-qwen-environment
+      (agent-shell-make-environment-variables
+       "OPENAI_BASE_URL" "https://openrouter.ai/api/v1"
+       "OPENAI_MODEL" "x-ai/grok-code-fast-1"))
+#+end_src
+
 *** Cursor
 
 By default authentication is handled externally: run =agent login= once outside Emacs and agent-shell uses that existing login (it sends no ACP authenticate request). This needs no configuration.
