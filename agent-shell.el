@@ -4252,7 +4252,7 @@ A buffer-local hash table mapping cache keys to header strings.")
   "Header model from the last full header update.
 
 Reused by heartbeat ticks, refreshing only the animated frame, so the
-model (project lookup, context usage, model/mode names, key bindings,
+model (project lookup, context usage, model/mode names, menu keys,
 frame metrics, ...) is not rebuilt on every beat.")
 
 
@@ -4296,13 +4296,11 @@ to fall back to black."
         (apply #'color-rgb-to-hex (append rgb '(2)))
       "#ffffff")))
 
-(cl-defun agent-shell--make-header-model (state &key position status bindings
-                                                model-binding mode-binding thought-level-binding)
-  "Create a header model alist from STATE, POSITION, STATUS, and BINDINGS.
-The model contains all inputs needed to render the header, so
-MODEL-BINDING, MODE-BINDING and THOUGHT-LEVEL-BINDING (key description
-strings shown in the model, session mode and thought level help-echo
-tooltips) are stored in it too."
+(cl-defun agent-shell--make-header-model (state &key position status key-hints menu-keys)
+  "Create a header model alist from STATE and the given header fields.
+The model contains all inputs needed to render the header.  POSITION,
+STATUS, KEY-HINTS and MENU-KEYS are as documented in
+`agent-shell--make-header'."
   `((:buffer-name . ,(map-nested-elt state '(:agent-config :buffer-name)))
     (:icon-name . ,(map-nested-elt state '(:agent-config :icon-name)))
     (:model-id . ,(map-nested-elt state '(:session :model-id)))
@@ -4327,10 +4325,8 @@ tooltips) are stored in it too."
     (:busy-indicator-frame . ,(agent-shell--busy-indicator-frame))
     (:position . ,position)
     (:status . ,status)
-    (:bindings . ,bindings)
-    (:model-binding . ,model-binding)
-    (:mode-binding . ,mode-binding)
-    (:thought-level-binding . ,thought-level-binding)))
+    (:key-hints . ,key-hints)
+    (:menu-keys . ,menu-keys)))
 
 (defun agent-shell--header-cache-key (model)
   "Generate a cache key from header MODEL.
@@ -4338,7 +4334,7 @@ Joins all values from the model alist."
   (mapconcat (lambda (pair) (format "%s" (cdr pair)))
              model "|"))
 
-(cl-defun agent-shell--make-header (state &key position status bindings model-binding mode-binding thought-level-binding)
+(cl-defun agent-shell--make-header (state &key position status key-hints menu-keys)
   "Return header text for current STATE.
 
 STATE should contain :agent-config with :icon-name, :buffer-name, and
@@ -4351,28 +4347,26 @@ STATUS: Optional string rendered at the end of the bottom line (e.g.
 propertize \"Edit\" with `success' face).  Honors text-property face for
 foreground color.
 
-BINDINGS is a list of alists defining key bindings to display, each with:
+KEY-HINTS is a list of alists defining the key hint row to display, each with:
   :key         - Key string (e.g., \"n\")
   :description - Description to display (e.g., \"next hunk\")
 
-MODEL-BINDING: Optional key description string for the model menu command.
-MODE-BINDING: Optional key description string for the session mode menu command.
-THOUGHT-LEVEL-BINDING: Optional key description string for the thought level
-menu command.
-When provided, included in help-echo tooltips."
+MENU-KEYS is an alist mapping each clickable label to the key description
+string shown in its help-echo tooltip, each with:
+  :model         - Key that opens the model menu
+  :mode          - Key that opens the session mode menu
+  :thought-level - Key that opens the thought level menu"
   (unless state
     (error "STATE is required"))
   (agent-shell--render-header-model
-   (agent-shell--make-header-model state :position position :status status :bindings bindings
-                                   :model-binding model-binding
-                                   :mode-binding mode-binding
-                                   :thought-level-binding thought-level-binding)))
+   (agent-shell--make-header-model state :position position :status status
+                                   :key-hints key-hints :menu-keys menu-keys)))
 
 (defun agent-shell--render-header-model (header-model)
   "Render HEADER-MODEL to a header string, caching the result.
 
 HEADER-MODEL is an alist produced by `agent-shell--make-header-model',
-holding every input needed to render, including the menu key bindings.
+holding every input needed to render, including the menu keys.
 
 Rendering builds the whole propertized header string, including three
 clickable menu keymaps, so it is expensive relative to a heartbeat tick.
@@ -4393,18 +4387,19 @@ keeps entries fresh."
 
 (defun agent-shell--render-header-model-uncached (header-model)
   "Render HEADER-MODEL to a header string without caching."
-  (let* ((bindings (map-elt header-model :bindings))
-         (model-binding (map-elt header-model :model-binding))
-         (mode-binding (map-elt header-model :mode-binding))
-         (thought-level-binding (map-elt header-model :thought-level-binding))
-         (help-binding (seq-find (lambda (b)
-                                   (equal (map-elt b :description) "Help"))
-                                 (map-elt header-model :bindings)))
-         (help-chunk (when help-binding
-                       (concat (propertize (map-elt help-binding :key)
+  (let* ((key-hints (map-elt header-model :key-hints))
+         (menu-keys (map-elt header-model :menu-keys))
+         (model-binding (map-elt menu-keys :model))
+         (mode-binding (map-elt menu-keys :mode))
+         (thought-level-binding (map-elt menu-keys :thought-level))
+         (help-hint (seq-find (lambda (b)
+                                (equal (map-elt b :description) "Help"))
+                              key-hints))
+         (help-chunk (when help-hint
+                       (concat (propertize (map-elt help-hint :key)
                                            'face 'agent-shell-key-binding)
                                " "
-                               (map-elt help-binding :description))))
+                               (map-elt help-hint :description))))
          (text-header (format " %s%s%s%s%s ➤ %s%s%s%s%s"
                               (cond
                                ((and (map-elt header-model :position)
@@ -4485,20 +4480,20 @@ keeps entries fresh."
            ;; | icon | Top text line
            ;; |      | Bottom text line
            ;; +------+
-           ;; Bindings row (optional, last row)
+           ;; Key hints row (optional, last row)
            ;; Caching is handled by `agent-shell--render-header-model'.
            (let* ((char-height (map-elt header-model :font-height))
                   (font-size (map-elt header-model :font-size))
-                  (has-bindings bindings)
+                  (has-key-hints key-hints)
                   (image-height (* 3 char-height))
                   (image-width image-height)
                   (text-height char-height)
                   (top-padding-height (/ font-size 2))
-                  (bottom-padding-height (if has-bindings (+ text-height top-padding-height) top-padding-height))
+                  (bottom-padding-height (if has-key-hints (+ text-height top-padding-height) top-padding-height))
                   ;; Match the natural inter-line stride between top and
-                  ;; bottom text rows so the bindings row sits the same
+                  ;; bottom text rows so the key hints row sits the same
                   ;; vertical distance below the bottom row.
-                  (row-spacing (if has-bindings (- char-height font-size) 0))
+                  (row-spacing (if has-key-hints (- char-height font-size) 0))
                   (total-height (+ image-height row-spacing top-padding-height bottom-padding-height))
                   ;; icon position
                   (icon-x 6)
@@ -4506,9 +4501,9 @@ keeps entries fresh."
                   ;; text position right of the icon area
                   (icon-text-x (+ icon-x image-width 10))
                   (icon-text-y (+ icon-y char-height (/ (- char-height font-size) 2)))
-                  ;; Bindings positioned below the icon area
-                  (bindings-x icon-x)
-                  (bindings-y (+ image-height font-size row-spacing))
+                  ;; Key hints positioned below the icon area
+                  (key-hints-x icon-x)
+                  (key-hints-y (+ image-height font-size row-spacing))
                   (svg (svg-create (map-elt header-model :frame-width) total-height))
                   (icon-filename
                    (if (map-elt header-model :icon-name)
@@ -4647,15 +4642,15 @@ keeps entries fresh."
                                                                 (dx . "8"))
                                                               (map-elt header-model :busy-indicator-frame))))
                                 text-node))
-             ;; Bindings row (last row if bindings present)
-             (when bindings
+             ;; Key hints row (last row if key hints present)
+             (when key-hints
                (svg--append svg (let ((text-node (dom-node 'text
-                                                           `((x . ,bindings-x)
-                                                             (y . ,bindings-y)
+                                                           `((x . ,key-hints-x)
+                                                             (y . ,key-hints-y)
                                                              (font-size . ,font-size))))
                                       (first t))
-                                  (dolist (binding bindings)
-                                    (when (map-elt binding :description)
+                                  (dolist (hint key-hints)
+                                    (when (map-elt hint :description)
                                       ;; Add key (XML-escape angle brackets)
                                       (dom-append-child text-node
                                                         (dom-node 'tspan
@@ -4665,14 +4660,14 @@ keeps entries fresh."
                                                                    "<" "&lt;"
                                                                    (replace-regexp-in-string
                                                                     ">" "&gt;"
-                                                                    (map-elt binding :key)))))
+                                                                    (map-elt hint :key)))))
                                       (setq first nil)
                                       ;; Add space and description
                                       (dom-append-child text-node
                                                         (dom-node 'tspan
                                                                   `((fill . ,(agent-shell--svg-fill-color 'font-lock-comment-face))
                                                                     (dx . "8"))
-                                                                  (map-elt binding :description)))))
+                                                                  (map-elt hint :description)))))
                                   text-node)))
              (let ((result (propertize
                             (format " %s" (with-temp-buffer
@@ -4719,15 +4714,15 @@ everything and clear the render cache."
            (setq agent-shell--header-last-model
                  (agent-shell--make-header-model
                   (agent-shell--state)
-                  :model-binding (key-description (where-is-internal
-                                                   'agent-shell-set-session-model
-                                                   agent-shell-mode-map t))
-                  :mode-binding (key-description (where-is-internal
-                                                  'agent-shell-set-session-mode
-                                                  agent-shell-mode-map t))
-                  :thought-level-binding (key-description (where-is-internal
-                                                           'agent-shell-set-session-thought-level
-                                                           agent-shell-mode-map t)))))))
+                  :menu-keys `((:model . ,(key-description (where-is-internal
+                                                            'agent-shell-set-session-model
+                                                            agent-shell-mode-map t)))
+                               (:mode . ,(key-description (where-is-internal
+                                                           'agent-shell-set-session-mode
+                                                           agent-shell-mode-map t)))
+                               (:thought-level . ,(key-description (where-is-internal
+                                                                    'agent-shell-set-session-thought-level
+                                                                    agent-shell-mode-map t)))))))))
   (when (memq agent-shell-header-style '(text none nil))
     (force-mode-line-update)))
 

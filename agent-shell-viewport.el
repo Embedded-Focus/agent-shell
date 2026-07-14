@@ -1277,8 +1277,8 @@ Returns only suffixes whose function has a binding in KEYMAP."
 (defun agent-shell-viewport--update-header ()
   "Update header and mode line based on `agent-shell-header-style'.
 
-Automatically determines position, status and bindings based on current
-major mode."
+Automatically determines position, status, key hints and menu keys based
+on current major mode."
   (agent-shell-viewport--ensure-buffer)
   (let* ((pos (or (agent-shell-viewport--position)
                   (list (cons :current 1) (cons :total 1))))
@@ -1292,7 +1292,7 @@ major mode."
                    (propertize "Edit" 'face 'agent-shell-viewport-status-edit))
                   ((derived-mode-p 'agent-shell-viewport-view-mode)
                    (propertize "View" 'face 'agent-shell-viewport-status-view))))
-         (bindings (cond
+         (key-hints (cond
                     ((derived-mode-p 'agent-shell-viewport-edit-mode)
                      (list
                       `((:key . ,(key-description (where-is-internal
@@ -1362,10 +1362,10 @@ major mode."
                           (agent-shell--make-header (agent-shell--state)
                                                     :position position-label
                                                     :status status
-                                                    :bindings bindings
-                                                    :model-binding model-binding
-                                                    :mode-binding mode-binding
-                                                    :thought-level-binding thought-level-binding))))
+                                                    :key-hints key-hints
+                                                    :menu-keys `((:model . ,model-binding)
+                                                                 (:mode . ,mode-binding)
+                                                                 (:thought-level . ,thought-level-binding))))))
       (setq-local header-line-format header))))
 
 (defvar-local agent-shell-viewport--clean-up t)
